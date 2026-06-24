@@ -1,0 +1,2119 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor de TEA · Renta Fija</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel-2:#1c232c; --line:#2a323c;
+    --ink:#e6edf3; --muted:#8b949e; --accent:#d4a017; --accent-soft:#3a3018;
+    --good:#3fb950; --bad:#f85149;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Georgia',serif;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:
+      radial-gradient(1200px 500px at 80% -10%, #1a2230 0%, transparent 60%),
+      var(--bg);
+    color:var(--ink);font-family:var(--mono);font-size:13px;line-height:1.5;
+    min-height:100vh;
+  }
+  header{
+    padding:26px 32px 18px;border-bottom:1px solid var(--line);
+    display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;
+  }
+  header h1{font-family:var(--sans);font-weight:600;font-size:26px;margin:0;letter-spacing:.5px;}
+  header h1 span{color:var(--accent)}
+  .subtitle{color:var(--muted);font-size:12px;margin-top:4px}
+  .loadbox{display:flex;align-items:center;gap:12px}
+  label.upload{
+    background:var(--accent);color:#1a1300;font-weight:600;padding:9px 18px;border-radius:6px;
+    cursor:pointer;transition:.15s;border:1px solid var(--accent);font-size:12px;letter-spacing:.5px;
+  }
+  label.upload:hover{filter:brightness(1.1)}
+  input[type=file]{display:none}
+  .status{color:var(--muted);font-size:11px;max-width:420px}
+  .status.ok{color:var(--good)}
+  .status.err{color:var(--bad)}
+
+  .wrap{display:grid;grid-template-columns:300px 1fr;gap:0;min-height:calc(100vh - 92px)}
+  aside{border-right:1px solid var(--line);padding:20px;background:var(--panel);display:flex;flex-direction:column;gap:22px;overflow-y:auto;max-height:calc(100vh - 92px);}
+  .group h3{font-family:var(--mono);text-transform:uppercase;letter-spacing:1.5px;font-size:10px;color:var(--muted);margin:0 0 12px;font-weight:500;}
+  .windowbtns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .windowbtns button,.toggle button,.curvetabs button{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);padding:7px 6px;border-radius:5px;cursor:pointer;font-family:var(--mono);font-size:11px;transition:.12s;}
+  .windowbtns button:hover,.toggle button:hover,.curvetabs button:hover{border-color:var(--accent)}
+  .windowbtns button.active,.toggle button.active,.curvetabs button.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  .curvetabs button.disabled{opacity:.35;cursor:not-allowed}
+  .curvetabs button.active{box-shadow:0 0 0 1px var(--accent-soft) inset}
+  .daterow{display:flex;gap:8px;margin-top:10px}
+  .daterow input{flex:1;background:var(--bg);border:1px solid var(--line);color:var(--ink);padding:6px;border-radius:5px;font-family:var(--mono);font-size:11px;color-scheme:dark;}
+
+  .specieshead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .specieshead h3{margin:0}
+  .minilinks{display:flex;gap:8px}
+  .minilinks a{color:var(--accent);cursor:pointer;font-size:10px;text-decoration:none;border-bottom:1px dotted}
+  .minilinks a:hover{color:#fff}
+  .specieslist,.typelist{display:flex;flex-direction:column;gap:3px}
+  .chk{display:flex;align-items:center;gap:9px;padding:5px 8px;border-radius:5px;cursor:pointer;transition:.1s;}
+  .chk:hover{background:var(--panel-2)}
+  .chk input{display:none}
+  .swatch{width:11px;height:11px;border-radius:50%;flex-shrink:0;border:1px solid #0006;opacity:.25;transition:.1s}
+  .chk.on .swatch{opacity:1}
+  .chk .name{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .chk.on .name{color:var(--ink);font-weight:500}
+  .chk .last{margin-left:auto;font-size:10px;color:#5a6573;white-space:nowrap}
+  .chk .tag{font-size:9px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 5px;margin-left:2px;white-space:nowrap}
+  .chk.on .last{color:var(--accent)}
+
+  main{padding:24px 28px;display:flex;flex-direction:column;gap:18px}
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+  .metric{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;}
+  .metric .k{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .metric .v{font-family:var(--sans);font-size:22px;margin-top:4px;font-weight:600}
+  .metric .v small{font-size:12px;color:var(--muted);font-family:var(--mono)}
+  .chartcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px 14px;position:relative;}
+  .chartcard .cap{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:12px;flex-wrap:wrap;}
+  .chartcard .cap h2{font-family:var(--sans);font-size:16px;margin:0;font-weight:600}
+  .toggle{display:flex;gap:6px}
+  .curvetabs{display:flex;gap:6px;flex-wrap:wrap}
+  .canvas-wrap{position:relative;height:430px;min-height:430px;max-height:430px;overflow:hidden}
+  .canvas-wrap canvas{display:block;width:100% !important;height:100% !important;}
+  .curve-meta{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:11px;margin-bottom:10px}
+  .curve-meta strong{color:var(--ink);font-weight:600}
+  .smallnote{color:var(--muted);font-size:10px;margin-top:2px}
+  .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--muted);text-align:center;padding:40px;}
+
+
+  .curve-tools{display:grid;grid-template-columns:260px 1fr;gap:14px;margin-bottom:12px}
+  .curve-filter{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:80px;max-height:220px;overflow:auto}
+  .curve-filter h3{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 8px}
+  .curve-date{background:var(--bg);border:1px solid var(--line);color:var(--ink);padding:7px 9px;border-radius:6px;font-family:var(--mono);font-size:12px;color-scheme:dark;width:100%}
+  .curve-inst-list{display:flex;flex-direction:column;gap:3px}
+  .curve-inst-row{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:5px;cursor:pointer}
+  .curve-inst-row:hover{background:#202833}
+  .curve-inst-row input{accent-color:var(--accent)}
+  .curve-inst-row span{font-size:11px;color:var(--ink)}
+  .curve-inst-row small{margin-left:auto;color:var(--muted);font-size:9px}
+  @media(max-width:1100px){.curve-tools{grid-template-columns:1fr}}
+
+  .volume-tools{display:grid;grid-template-columns:220px 260px 1fr;gap:14px;margin-bottom:12px}
+  .vol-filter{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:120px;max-height:220px;overflow:auto}
+  .vol-filter h3{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 8px}
+  .vol-list{display:flex;flex-direction:column;gap:3px}
+  .vol-row{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:5px;cursor:pointer}
+  .vol-row:hover{background:#202833}
+  .vol-row input{accent-color:var(--accent)}
+  .vol-row span{font-size:11px;color:var(--ink)}
+  .vol-row small{margin-left:auto;color:var(--muted);font-size:9px}
+  .volume-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+  .volume-panel{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px;min-height:390px}
+  .volume-panel h3{font-family:var(--sans);font-size:14px;margin:0 0 4px;color:var(--ink);font-weight:600;text-transform:none;letter-spacing:0}
+  .volume-panel .hint{font-size:10px;color:var(--muted);margin-bottom:8px}
+  .volume-canvas{height:330px;position:relative;overflow:hidden}
+  .volume-canvas canvas{display:block;width:100% !important;height:100% !important}
+  @media(max-width:1100px){.volume-grid,.volume-tools{grid-template-columns:1fr}}
+
+
+  .mix-windowbtns{display:grid;grid-template-columns:repeat(3,110px);gap:8px}
+  .mix-windowbtns button{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);padding:8px 8px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:12px;transition:.12s}
+  .mix-windowbtns button:hover{border-color:var(--accent)}
+  .mix-windowbtns button.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  .mix-date-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  @media(max-width:700px){.mix-windowbtns{grid-template-columns:repeat(3,1fr);width:100%}.mix-controls select{min-width:100%}}
+
+  .mix-controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .mix-controls label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .mix-controls select{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);padding:8px 10px;border-radius:6px;font-family:var(--mono);font-size:12px;min-width:280px}
+  .mix-controls input[type=date]{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);padding:7px 9px;border-radius:6px;font-family:var(--mono);font-size:12px;color-scheme:dark}
+  .mix-controls select:focus,.mix-controls input[type=date]:focus{outline:none;border-color:var(--accent)}
+  .empty .big{font-family:var(--sans);font-size:18px;color:var(--ink)}
+  footer{padding:10px 28px;color:#5a6573;font-size:10px;border-top:1px solid var(--line)}
+  @media(max-width:980px){.wrap{grid-template-columns:1fr}aside{max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+
+  /* ── Main tabs ── */
+  .maintabs{display:flex;gap:0;border-bottom:1px solid var(--line);padding:0 28px;background:var(--panel)}
+  .mtab{background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);padding:12px 18px;cursor:pointer;font-family:var(--mono);font-size:12px;letter-spacing:.5px;transition:.15s;margin-bottom:-1px}
+  .mtab:hover{color:var(--ink)}
+  .mtab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+  /* ── Forwards tab ── */
+  #tab-forwards{padding:24px 28px;flex-direction:column;gap:18px}
+  .fwd-builder{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:14px}
+  .fwd-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+  .fwd-field{display:flex;flex-direction:column;gap:5px}
+  .fwd-field label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .fwd-field select{background:var(--bg);border:1px solid var(--line);color:var(--ink);padding:7px 10px;border-radius:6px;font-family:var(--mono);font-size:12px;min-width:200px}
+  .fwd-field select:focus{outline:none;border-color:var(--accent)}
+  .fwd-field--btn{min-width:auto}
+  .fwd-add-btn{background:var(--accent);color:#1a1300;font-weight:600;padding:8px 16px;border:none;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:12px;white-space:nowrap}
+  .fwd-add-btn:hover{filter:brightness(1.1)}
+  .fwd-pairs{display:flex;flex-direction:column;gap:6px}
+  .fwd-pair-tag{display:inline-flex;align-items:center;gap:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:20px;padding:5px 12px;font-size:11px;font-family:var(--mono)}
+  .fwd-pair-tag .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+  .fwd-pair-tag .lbl{color:var(--ink)}
+  .fwd-pair-tag .last-val{color:var(--accent);margin-left:4px}
+  .fwd-pair-tag button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:0 2px}
+  .fwd-pair-tag button:hover{color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Monitor de <span>TEA</span></h1>
+    <div class="subtitle">Tasas, breakevens e indicadores dólar/caución · evolución + curva de última rueda</div>
+  </div>
+  <div class="loadbox">
+    <button class="upload" id="btnRefresh" onclick="loadFromSheets()">↻ Actualizar</button>
+    <label class="upload" style="background:transparent;color:var(--muted);border-color:var(--line);font-size:11px;" for="file">▲ Excel manual</label>
+    <input type="file" id="file" accept=".xlsx,.xls">
+    <div class="status" id="status">Cargando Google Sheets…</div>
+  </div>
+</header>
+
+<!-- ── Nav tabs ── -->
+<nav class="maintabs" id="maintabs">
+  <button class="mtab active" data-tab="dashboard">Dashboard</button>
+  <button class="mtab" data-tab="forwards">Forwards implícitas</button>
+</nav>
+
+<div id="tab-dashboard">
+<div class="wrap">
+  <aside>
+    <div class="group">
+      <h3>Ventana de tiempo</h3>
+      <div class="windowbtns" id="windows">
+        <button data-d="7">7D</button><button data-d="30">1M</button><button data-d="90">3M</button>
+        <button data-d="180">6M</button><button data-d="365">1A</button><button data-d="0" class="active">Todo</button>
+      </div>
+      <div class="daterow"><input type="date" id="from" title="Desde"><input type="date" id="to" title="Hasta"></div>
+    </div>
+
+    <div class="group">
+      <div class="specieshead"><h3>Tipo de serie</h3><div class="minilinks"><a id="typeAll">todos</a><a id="typeNone">ninguno</a></div></div>
+      <div class="typelist" id="typelist"><div style="color:var(--muted);font-size:11px;padding:8px">— sin datos —</div></div>
+    </div>
+
+    <div class="group">
+      <div class="specieshead"><h3>Series</h3><div class="minilinks"><a id="selAll">todas</a><a id="selNone">ninguna</a></div></div>
+      <div class="specieslist" id="specieslist"><div style="color:var(--muted);font-size:11px;padding:8px">— sin datos —</div></div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="metrics" id="metrics"></div>
+
+    <div class="chartcard">
+      <div class="cap">
+        <div>
+          <h2 id="chartTitle">Evolución por tipo y serie</h2>
+          <div class="smallnote">La película: evolución histórica con puntos por rueda y línea de unión.</div>
+        </div>
+        <div class="toggle" id="unit"><button data-u="value" class="active">valor</button><button data-u="delta">Δ</button></div>
+      </div>
+      <div class="canvas-wrap"><canvas id="chart"></canvas><div class="empty" id="empty"><div class="big">Sin datos cargados</div><div>Cargá un Excel y seleccioná al menos una serie para comparar.</div></div></div>
+    </div>
+
+    <div class="chartcard">
+      <div class="cap">
+        <div>
+          <h2>Última rueda · curva por tipo</h2>
+          <div class="smallnote">La foto: elegí un tipo y una fecha de rueda. Podés excluir especies desde la lista o clickeando el punto. El tooltip muestra tasa y % operado dentro del tipo.</div>
+        </div>
+        <div class="curvetabs" id="curveTabs"></div>
+      </div>
+      <div class="curve-tools">
+        <div class="curve-filter">
+          <h3>Fecha de rueda</h3>
+          <input type="date" id="curveDate" class="curve-date">
+        </div>
+        <div class="curve-filter">
+          <h3>Especies para interpolante</h3>
+          <div class="minilinks" style="margin-bottom:8px"><a id="curveInstAll">todas</a><a id="curveInstNone">ninguna</a></div>
+          <div class="curve-inst-list" id="curveInstList"><div style="color:var(--muted);font-size:11px;padding:8px">— sin datos —</div></div>
+        </div>
+      </div>
+      <div class="curve-meta" id="curveMeta"></div>
+      <div class="canvas-wrap"><canvas id="curveChart"></canvas><div class="empty" id="curveEmpty"><div class="big">Sin curva de rueda</div><div>Cargá un Excel para ver la curva por tipo y fecha.</div></div></div>
+    </div>
+
+    <div class="chartcard">
+      <div class="cap">
+        <div>
+          <h2>Volumen / Actividad</h2>
+          <div class="smallnote">Solo barras: composición general fija por tipo y detalle por un solo tipo a la vez.</div>
+        </div>
+      </div>
+
+      <div class="curve-meta" id="volumeMeta"></div>
+
+      <div class="volume-tools">
+        <div class="vol-filter">
+          <h3>Fecha de rueda</h3>
+          <input type="date" id="volumeDate" class="curve-date">
+          <div class="smallnote" style="margin-top:8px">Por defecto toma la última rueda disponible.</div>
+        </div>
+        <div class="vol-filter">
+          <h3>Tipo para detalle</h3>
+          <div class="minilinks" style="margin-bottom:8px"><a id="volTypeAll">TF</a><a id="volTypeNone">CER</a></div>
+          <div class="vol-list" id="volTypeList"><div style="color:var(--muted);font-size:11px;padding:8px">— sin datos —</div></div>
+        </div>
+        <div class="vol-filter">
+          <h3>Instrumentos</h3>
+          <div class="minilinks" style="margin-bottom:8px"><a id="volInstAll">todos</a><a id="volInstNone">ninguno</a></div>
+          <div class="vol-list" id="volInstList"><div style="color:var(--muted);font-size:11px;padding:8px">— sin datos —</div></div>
+        </div>
+      </div>
+
+      <div class="volume-grid">
+        <div class="volume-panel">
+          <h3>Composición general</h3>
+          <div class="hint">% del volumen total por tipo · última rueda · fijo TF/CER/TAMAR/DL</div>
+          <div class="volume-canvas"><canvas id="volumeTotalChart"></canvas></div>
+        </div>
+        <div class="volume-panel">
+          <h3>Dentro de cada tipo</h3>
+          <div class="hint">% de cada instrumento dentro del tipo elegido · última rueda</div>
+          <div class="volume-canvas"><canvas id="volumeInsideChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="chartcard">
+      <div class="cap">
+        <div>
+          <h2>Histórico mixto · instrumento único</h2>
+          <div class="smallnote">Elegí un solo instrumento para ver tasa principal, breakeven y monto operado, sin mezclarlo con el resto del dashboard.</div>
+        </div>
+      </div>
+      <div class="mix-controls">
+        <label for="mixInstrument">Instrumento</label>
+        <select id="mixInstrument">
+          <option value="">Cargá un Excel para elegir instrumento</option>
+        </select>
+      </div>
+      <div class="mix-controls">
+        <div class="mix-windowbtns" id="mixWindows">
+          <button data-d="7">7D</button><button data-d="30">1M</button><button data-d="90">3M</button>
+          <button data-d="180">6M</button><button data-d="365">1A</button><button data-d="0" class="active">Todo</button>
+        </div>
+        <div class="mix-date-row">
+          <label for="mixFrom">Desde</label>
+          <input type="date" id="mixFrom" title="Desde">
+          <label for="mixTo">Hasta</label>
+          <input type="date" id="mixTo" title="Hasta">
+        </div>
+      </div>
+      <div class="curve-meta" id="mixMeta"></div>
+      <div class="canvas-wrap">
+        <canvas id="mixChart"></canvas>
+        <div class="empty" id="mixEmpty">
+          <div class="big">Sin instrumento seleccionado</div>
+          <div>Cargá un Excel y elegí un instrumento para ver tasa, breakeven y monto operado.</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+</div><!-- /tab-dashboard -->
+<footer id="footer">Listo para cargar · historico/historico2 + breakeven CER2/TAMAR2 + DOLARCAUCION + curva de última rueda + barras de volumen + histórico mixto por instrumento · volumen fijo · curva por fecha · volumen por fecha · mixto con ventana</footer>
+
+<!-- ── Forwards tab ── -->
+<div id="tab-forwards" style="display:none;">
+
+  <div class="chartcard">
+    <div class="cap">
+      <div>
+        <h2>Forwards implícitas · histórico de pares</h2>
+        <div class="smallnote">F<sub>1,2</sub> = [(1+R₂)^t₂ / (1+R₁)^t₁]^(1/(t₂−t₁)) − 1 · t = (vencimiento − fecha) / 365 · misma convención que la curva (TEM para TF, TEA para el resto)</div>
+      </div>
+    </div>
+
+    <!-- Par builder -->
+    <div class="fwd-builder" id="fwdBuilder">
+      <div class="fwd-row">
+        <div class="fwd-field">
+          <label>Tipo</label>
+          <select id="fwdTipo">
+            <option value="">— cargá datos primero —</option>
+          </select>
+        </div>
+        <div class="fwd-field">
+          <label>Instrumento corto (R₁ · t₁)</label>
+          <select id="fwdInst1"><option value="">—</option></select>
+        </div>
+        <div class="fwd-field">
+          <label>Instrumento largo (R₂ · t₂)</label>
+          <select id="fwdInst2"><option value="">—</option></select>
+        </div>
+        <div class="fwd-field fwd-field--btn">
+          <label>&nbsp;</label>
+          <button class="fwd-add-btn" id="fwdAddBtn" onclick="fwdAddPair()">+ Agregar par</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Par list -->
+    <div class="fwd-pairs" id="fwdPairs"></div>
+
+    <!-- Chart -->
+    <div class="canvas-wrap" style="margin-top:12px">
+      <canvas id="fwdChart"></canvas>
+      <div class="empty" id="fwdEmpty">
+        <div class="big">Sin pares cargados</div>
+        <div>Seleccioná tipo e instrumentos y agregá un par para ver el histórico de la forward implícita.</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tab-forwards -->
+
+<script>
+const PALETTE = ['#d4a017','#58a6ff','#3fb950','#f85149','#bc8cff','#ff9e64','#56d4c4','#e3b341','#79c0ff','#ff7b72','#a5d6ff','#d2a8ff','#7ee787','#ffa657','#f0883e','#39c5cf','#db61a2','#ec6cb9','#8ddb8c'];
+const CURVE_ORDER = ['TF','CER','CER2','TAMAR','TAMAR2','DL','DL2','MEP','CCL','BOPREAL'];
+const CURVE_CONFIG = {
+  TF:{label:'Tasa Fija', xMode:'venc', title:'Tasa fija · tasa vs vencimiento'},
+  CER:{label:'CER', xMode:'venc', title:'CER · tasa vs vencimiento'},
+  CER2:{label:'CER2 · Breakeven', xMode:'venc', title:'CER2 · breakeven vs vencimiento'},
+  TAMAR:{label:'TAMAR', xMode:'venc', title:'TAMAR · tasa vs vencimiento'},
+  TAMAR2:{label:'TAMAR2 · Breakeven', xMode:'venc', title:'TAMAR2 · breakeven vs vencimiento'},
+  DL:{label:'DL', xMode:'venc', title:'Dólar Link · tasa vs vencimiento'},
+  DL2:{label:'DL2 · Breakeven', xMode:'venc', title:'DL2 · breakeven vs vencimiento'},
+  MEP:{label:'MEP', xMode:'duration', title:'MEP · TEA vs duration'},
+  CCL:{label:'CCL', xMode:'duration', title:'CCL · TEA vs duration'},
+  BOPREAL:{label:'BOPREAL', xMode:'duration', title:'BOPREAL · TEA vs duration'}
+};
+
+let RAW = [];       // {id, name, fecha, value, tipo, fuente, scale}
+let series = [];    // [{id,name,type,color,selected,last,scale}]
+let types = [];     // [{name,selected,count}]
+let latestCurves = {}; // {tipo:[{x,y,name,venc,refDate}]}
+let curveMetaInfo = {}; // {tipo:{refDate,xMode,count}}
+let curveAll = {}; // {tipo:{dateStr:[{x,y,name,venc,refDate}]}}
+let selectedCurveType = 'TF';
+let selectedCurveDate = null;
+let curveIncluded = new Map();
+let VOL_RAW = [];       // {name,tipo,fecha,volume}
+let volTypes = [];      // [{name,selected,count}]
+let volInst = [];       // [{key,name,tipo,selected,lastVol}]
+let volumeTotalChart = null;
+let volumeInsideChart = null;
+let selectedVolDetailType = 'TF';
+let showVolumeAvg5 = false;
+let selectedVolumeDate = null;
+let MIX_RAW = [];
+let mixChart = null;
+let mixWin = 0;
+let win = 0;
+let unit = 'value';
+let chart = null;
+let curveChart = null;
+let dateMin=null, dateMax=null;
+const $ = id => document.getElementById(id);
+
+function excelDate(v){
+  if(v instanceof Date) return new Date(v.getFullYear(), v.getMonth(), v.getDate(), 12, 0, 0, 0);
+  if(typeof v === 'number'){
+    const utc = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate(), 12, 0, 0, 0);
+  }
+  const d = new Date(v);
+  if(isNaN(d)) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
+}
+function pad2(n){ return String(n).padStart(2,'0'); }
+function fmtDate(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function displayDate(d){ return d ? pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+d.getFullYear() : '—'; }
+function dateInputValue(v, end=false){
+  if(!v) return null;
+  const [y,m,d] = v.split('-').map(Number);
+  return new Date(y, m-1, d, end ? 23 : 0, end ? 59 : 0, end ? 59 : 0, end ? 999 : 0);
+}
+function normKey(x){ return String(x).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\s_./-]+/g,'').trim(); }
+function keyOf(obj, names){
+  const keys = Object.keys(obj);
+  const wanted = names.map(normKey);
+  return keys.find(k => wanted.includes(normKey(k))) || null;
+}
+function parseNum(x){
+  if(x==null || x==='') return null;
+  if(typeof x === 'number') return Number.isFinite(x) ? x : null;
+  let s = String(x).trim();
+  if(!s) return null;
+  if(s.includes(',') && s.includes('.')) s = s.replace(/\./g,'').replace(',','.');
+  else s = s.replace(',','.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+function cleanType(t){
+  if(!t) return 'SIN TIPO';
+  const s = String(t).trim().toUpperCase();
+  if(['DOLARCAUCION','DOLAR/CAUCION','DÓLAR/CAUCIÓN','DOLAR CAUCION','DÓLAR CAUCIÓN'].includes(s)) return 'DOLAR/CAUCION';
+  return s;
+}
+function seriesId(tipo, name){ return cleanType(tipo)+'|'+String(name).trim(); }
+function addPoint(name, tipo, fecha, value, fuente, scale='pct'){
+  if(!name || !fecha || value==null || !Number.isFinite(value)) return;
+  const type = cleanType(tipo);
+  const id = seriesId(type, name);
+  RAW.push({id, name:String(name).trim(), fecha, value, tipo:type, fuente, scale});
+}
+function pctIfPercentNumber(v){ return Math.abs(v)>2 ? v/100 : v; }
+function typeOrder(t){ return {'TF':1,'CER':2,'CER2':3,'TAMAR':4,'TAMAR2':5,'DL':6,'DL2':7,'MEP':8,'CCL':9,'BOPREAL':10,'DOLAR/CAUCION':11,'SIN TIPO':99}[t] || 50; }
+function activeTypes(){ return new Set(types.filter(t=>t.selected).map(t=>t.name)); }
+function formatVal(v, scale, asDelta=false){
+  if(v==null || !Number.isFinite(v)) return '';
+  if(scale==='pct') return (asDelta ? (v>=0?'+':'')+(v*10000).toFixed(0)+' bps' : (v*100).toFixed(2)+'%');
+  return (asDelta ? (v>=0?'+':'') : '') + v.toLocaleString('es-AR',{maximumFractionDigits:2});
+}
+function chartVal(v, scale, base){
+  if(unit==='delta') return scale==='pct' ? (v-base)*10000 : v-base;
+  return scale==='pct' ? v*100 : v;
+}
+function findSheet(wb, wanted){
+  const w = normKey(wanted);
+  return wb.SheetNames.find(s => normKey(s) === w) || wb.SheetNames.find(s => normKey(s).includes(w)) || null;
+}
+function sameDay(a,b){ return a && b && fmtDate(a)===fmtDate(b); }
+function yearsBetween(a,b){ return (b-a)/(365.25*86400000); }
+
+// ── Google Sheets integration ────────────────────────────────────────────────
+const SHEET_ID = '1q9oXRndvHeS9LhpVbQZmYOeMXg90GO2IobaLwFONA1s';
+const SHEET_NAMES = ['historico', 'historico2', 'DOLARCAUCION'];
+
+function gidUrl(sheetName){
+  // We'll fetch each sheet by name using the export CSV endpoint
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+}
+
+async function fetchSheetCSV(sheetName){
+  const url = gidUrl(sheetName);
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error(`HTTP ${resp.status} al leer "${sheetName}"`);
+  return await resp.text();
+}
+
+function csvToSheet(csvText){
+  // Parse CSV → array of arrays, then build XLSX sheet object manually
+  const rows = [];
+  // Use XLSX built-in CSV reader
+  const wb = XLSX.read(csvText, {type:'string', cellDates:true, dateNF:'yyyy-mm-dd'});
+  return wb.Sheets[wb.SheetNames[0]];
+}
+
+async function loadFromSheets(){
+  setStatus('Conectando con Google Sheets…','');
+  $('btnRefresh').disabled = true;
+  $('btnRefresh').textContent = '…';
+  try{
+    const wb = { SheetNames: [], Sheets: {} };
+    for(const name of SHEET_NAMES){
+      try{
+        const csv = await fetchSheetCSV(name);
+        const sheet = csvToSheet(csv);
+        wb.SheetNames.push(name);
+        wb.Sheets[name] = sheet;
+      } catch(e){
+        console.warn(`Sheet "${name}" no encontrada o error:`, e.message);
+      }
+    }
+    if(!wb.SheetNames.length) throw new Error('No se pudo leer ninguna hoja');
+    parseWorkbook(wb, 'Google Sheets');
+  } catch(err){
+    setStatus('Error cargando Sheets: '+err.message+' — podés cargar el Excel manualmente.','err');
+  } finally{
+    $('btnRefresh').disabled = false;
+    $('btnRefresh').textContent = '↻ Actualizar';
+  }
+}
+
+// Auto-load on open
+window.addEventListener('DOMContentLoaded', ()=>{ loadFromSheets(); });
+
+// ── Manual Excel fallback ────────────────────────────────────────────────────
+$('file').addEventListener('change', e=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  setStatus('Leyendo '+f.name+'…','');
+  const r = new FileReader();
+  r.onload = ev=>{
+    try{
+      const wb = XLSX.read(new Uint8Array(ev.target.result), {type:'array',cellDates:true});
+      parseWorkbook(wb, f.name);
+    }catch(err){ setStatus('Error al leer: '+err.message,'err'); }
+  };
+  r.readAsArrayBuffer(f);
+});
+
+function parseWorkbook(wb, fname){
+  RAW = [];
+  VOL_RAW = [];
+  MIX_RAW = [];
+  latestCurves = {};
+  curveMetaInfo = {};
+  curveAll = {};
+  const errors = [];
+  const used = [];
+  let histRows = [];
+  let hist2Rows = [];
+
+  for(const target of ['historico','historico2']){
+    const sheetName = findSheet(wb, target);
+    if(!sheetName) continue;
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:null});
+    if(!rows.length){ errors.push(sheetName+': hoja vacía'); continue; }
+    if(normKey(sheetName).includes('historico2')) hist2Rows = rows;
+    else histRows = rows;
+    const kE = keyOf(rows[0], ['especie','especies','ticker','simbolo']);
+    const kF = keyOf(rows[0], ['fecha','date','dia']);
+    const kT = keyOf(rows[0], ['tea','tir','tasa','tasa_principal','tasa principal']);
+    const kTipo = keyOf(rows[0], ['tipo','type','clase','categoria','categoría']);
+    const kBE = keyOf(rows[0], ['breakeven','break even','be']);
+    const kVol = keyOf(rows[0], ['volumen','volume','monto','monto operado','operado']);
+    if(!kE||!kF||!kT){ errors.push(sheetName+': faltan columnas especie/fecha/tasa'); continue; }
+
+    let n = 0;
+    for(const row of rows){
+      const e = row[kE];
+      const d = excelDate(row[kF]);
+      const t = parseNum(row[kT]);
+      const tipo = cleanType(kTipo ? row[kTipo] : 'SIN TIPO');
+      if(e!=null && d && t!=null){ addPoint(String(e).trim(), tipo, d, t, sheetName, 'pct'); n++; }
+      let volMix = null;
+      if(e!=null && d && kVol){
+        const vol = parseNum(row[kVol]);
+        if(vol!=null && vol>=0){
+          VOL_RAW.push({name:String(e).trim(), tipo, fecha:d, volume:vol});
+          volMix = vol;
+        }
+      }
+      if(e!=null && d){
+        MIX_RAW.push({
+          key: cleanType(tipo)+'|'+String(e).trim(),
+          name: String(e).trim(),
+          tipo: cleanType(tipo),
+          fecha: d,
+          tasa: t,
+          breakeven: kBE ? parseNum(row[kBE]) : null,
+          volume: volMix
+        });
+      }
+      if(kBE && e!=null && d){
+        const be = parseNum(row[kBE]);
+        if(be!=null && (tipo==='CER' || tipo==='TAMAR' || tipo==='DL')){
+          addPoint(String(e).trim()+' · BE', tipo+'2', d, be, sheetName+' · breakeven', 'pct');
+          n++;
+        }
+      }
+    }
+    if(n) used.push(sheetName+' ('+n+')');
+  }
+
+  const dcSheet = findSheet(wb, 'DOLARCAUCION') || findSheet(wb, 'DOLAR CAUCION') || findSheet(wb, 'DOLAR/CAUCION');
+  if(dcSheet){
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[dcSheet], {defval:null});
+    if(rows.length){
+      const kF = keyOf(rows[0], ['fecha','date','dia']);
+      const indicators = [
+        {keys:['Cierre USD','cierre usd','usd','dolar mep'], name:'Cierre USD', scale:'raw', percent:false},
+        {keys:['Cierre USDC','cierre usdc','usdc','dolar cable','ccl'], name:'Cierre USDC', scale:'raw', percent:false},
+        {keys:['canje'], name:'Canje', scale:'pct', percent:false},
+        {keys:['Tasa caución','Tasa caucion','caucion pesos'], name:'Tasa caución $', scale:'pct', percent:true},
+        {keys:['Tasa caución dólar','Tasa caucion dolar','caucion dolar'], name:'Tasa caución USD', scale:'pct', percent:true},
+        {keys:['a3500','A3500','A 3500','A-3500','dolar oficial','dólar oficial','oficial','tipo de cambio oficial','tc oficial','comunicacion a3500','comunicación a3500'], name:'A3500', scale:'raw', percent:false},
+        {keys:['brecha'], name:'Brecha', scale:'pct', percent:false}
+      ];
+      const map = indicators.map(ind => ({...ind, key:keyOf(rows[0], ind.keys)})).filter(ind => ind.key);
+      let n = 0;
+      for(const row of rows){
+        const d = excelDate(row[kF]);
+        if(!d) continue;
+        for(const ind of map){
+          let v = parseNum(row[ind.key]);
+          if(v==null) continue;
+          if(ind.percent) v = pctIfPercentNumber(v);
+          addPoint(ind.name, 'DOLAR/CAUCION', d, v, dcSheet, ind.scale);
+          n++;
+        }
+      }
+      if(n) used.push(dcSheet+' ('+n+')');
+    }
+  }
+
+  if(!RAW.length){
+    series=[]; types=[]; renderTypes(); renderSeries(); render(); renderCurveTabs(); renderCurveDateControl(); renderCurveInstFilter(); renderCurve(); renderMixSelector(); renderMixChart();
+    setStatus(errors.length ? errors.join(' | ') : 'No se encontraron datos utilizables.','err');
+    return;
+  }
+
+  const byKey = new Map();
+  for(const r of RAW){ byKey.set(r.id+'|'+fmtDate(r.fecha), r); }
+  RAW = [...byKey.values()].sort((a,b)=>a.fecha-b.fecha || a.id.localeCompare(b.id));
+
+  const volByKey = new Map();
+  for(const v of VOL_RAW){ volByKey.set(cleanType(v.tipo)+'|'+v.name+'|'+fmtDate(v.fecha), {...v, tipo:cleanType(v.tipo)}); }
+  VOL_RAW = [...volByKey.values()].sort((a,b)=>a.fecha-b.fecha || a.tipo.localeCompare(b.tipo) || a.name.localeCompare(b.name));
+
+  const mixByKey = new Map();
+  for(const m of MIX_RAW){
+    const k = m.key+'|'+fmtDate(m.fecha);
+    const prev = mixByKey.get(k) || {};
+    mixByKey.set(k, {
+      ...prev,
+      ...m,
+      tasa: m.tasa!=null ? m.tasa : prev.tasa,
+      breakeven: m.breakeven!=null ? m.breakeven : prev.breakeven,
+      volume: m.volume!=null ? m.volume : prev.volume
+    });
+  }
+  MIX_RAW = [...mixByKey.values()].sort((a,b)=>a.fecha-b.fecha || a.key.localeCompare(b.key));
+
+  dateMin = RAW[0].fecha; dateMax = RAW[RAW.length-1].fecha;
+  const typeNames = [...new Set(RAW.map(r=>r.tipo))].sort((a,b)=>typeOrder(a)-typeOrder(b) || a.localeCompare(b));
+  types = typeNames.map(t=>({name:t, selected:true, count:new Set(RAW.filter(r=>r.tipo===t).map(r=>r.id)).size}));
+
+  const ids = [...new Set(RAW.map(r=>r.id))].sort();
+  series = ids.map((id,i)=>{
+    const pts = RAW.filter(r=>r.id===id).sort((a,b)=>a.fecha-b.fecha);
+    const last = pts.length ? pts[pts.length-1].value : null;
+    return {id, name:pts[0].name, type:pts[0].tipo, scale:pts[0].scale, color:PALETTE[i%PALETTE.length], selected:i<6, last};
+  });
+
+  buildLatestCurves(histRows, hist2Rows);
+  buildVolumeFilters();
+
+  win = 0; unit = 'value'; mixWin = 0;
+  $('from').value = fmtDate(dateMin); $('to').value = fmtDate(dateMax);
+  $('from').min = $('to').min = fmtDate(dateMin); $('from').max = $('to').max = fmtDate(dateMax);
+  [...$('windows').children].forEach(b=>b.classList.toggle('active', b.dataset.d==='0'));
+  [...$('unit').children].forEach(b=>b.classList.toggle('active', b.dataset.u==='value'));
+  if($('mixWindows')) [...$('mixWindows').children].forEach(b=>b.classList.toggle('active', b.dataset.d==='0'));
+
+  renderTypes(); renderSeries(); render(); renderCurveTabs(); renderCurveDateControl(); renderCurveInstFilter(); renderCurve(); renderVolumeDateControl(); renderVolumeFilters(); renderVolumeBars(); renderMixSelector(); renderMixChart();
+  fwdOnDataLoad();
+  setStatus('✓ '+RAW.length+' registros · '+series.length+' series · '+types.length+' tipos · hojas: '+used.join(' + '),'ok');
+  $('footer').textContent = 'Cargado: '+fname+' · '+fmtDate(dateMin)+' → '+fmtDate(dateMax)+' · '+series.length+' series · hojas: '+used.join(' + ');
+}
+
+function curveAddPoint(tipo, dateObj, point){
+  const t = cleanType(tipo);
+  const ds = fmtDate(dateObj);
+  if(!curveAll[t]) curveAll[t] = {};
+  if(!curveAll[t][ds]) curveAll[t][ds] = [];
+  curveAll[t][ds].push(point);
+}
+function curveAvailableDates(type){
+  return curveAll[type] ? Object.keys(curveAll[type]).sort() : [];
+}
+function refreshLatestCurvesFromSelection(){
+  latestCurves = {};
+  curveMetaInfo = {};
+  CURVE_ORDER.forEach(t=>latestCurves[t]=[]);
+
+  const type = selectedCurveType;
+  const dates = curveAvailableDates(type);
+  if(!dates.length) return;
+
+  if(!selectedCurveDate || !dates.includes(selectedCurveDate)){
+    selectedCurveDate = dates[dates.length-1];
+  }
+
+  latestCurves[type] = (curveAll[type][selectedCurveDate] || []).slice().sort((a,b)=>a.x-b.x);
+  if(latestCurves[type].length){
+    curveMetaInfo[type] = {
+      refDate: latestCurves[type][0].refDate,
+      xMode: CURVE_CONFIG[type].xMode,
+      count: latestCurves[type].length
+    };
+  }
+}
+function ensureCurveTypeAvailable(){
+  if(selectedCurveType && curveAvailableDates(selectedCurveType).length) return;
+  const firstAvailable = CURVE_ORDER.find(t => curveAvailableDates(t).length);
+  selectedCurveType = firstAvailable || 'TF';
+}
+function buildLatestCurves(histRows, hist2Rows){
+  latestCurves = {};
+  curveMetaInfo = {};
+  curveAll = {};
+  CURVE_ORDER.forEach(t=>{
+    latestCurves[t]=[];
+    curveAll[t]={};
+  });
+
+  if(histRows.length){
+    const kE = keyOf(histRows[0], ['especie','especies','ticker','simbolo']);
+    const kF = keyOf(histRows[0], ['fecha','date','dia']);
+    const kT = keyOf(histRows[0], ['tea','tir','tasa','tasa_principal','tasa principal']);
+    const kTipo = keyOf(histRows[0], ['tipo','type','clase','categoria','categoría']);
+    const kV = keyOf(histRows[0], ['vencimiento','vto','maturity']);
+    const kBE = keyOf(histRows[0], ['breakeven','break even','be']);
+    if(kE&&kF&&kT&&kTipo&&kV){
+      for(const row of histRows){
+        const d = excelDate(row[kF]);
+        if(!d) continue;
+        const tipo = cleanType(row[kTipo]);
+        if(!['TF','CER','TAMAR','DL'].includes(tipo)) continue;
+        const y = parseNum(row[kT]);
+        const venc = excelDate(row[kV]);
+        const name = row[kE];
+        if(y==null || !venc || name==null) continue;
+        const x = yearsBetween(d, venc);
+        if(!Number.isFinite(x)) continue;
+        const p = {x, y, name:String(name).trim(), venc, refDate:d, include:true};
+        curveAddPoint(tipo, d, p);
+
+        if(kBE && (tipo==='CER' || tipo==='TAMAR' || tipo==='DL')){
+          const be = parseNum(row[kBE]);
+          if(be!=null && Number.isFinite(be)){
+            curveAddPoint(tipo+'2', d, {x, y:be, name:String(name).trim(), venc, refDate:d, include:true});
+          }
+        }
+      }
+    }
+  }
+
+  if(hist2Rows.length){
+    const kE = keyOf(hist2Rows[0], ['especie','especies','ticker','simbolo']);
+    const kF = keyOf(hist2Rows[0], ['fecha','date','dia']);
+    const kT = keyOf(hist2Rows[0], ['tea','tir','tasa','tasa_principal','tasa principal']);
+    const kTipo = keyOf(hist2Rows[0], ['tipo','type','clase','categoria','categoría']);
+    const kD = keyOf(hist2Rows[0], ['duration','duracion','duración']);
+    if(kE&&kF&&kT&&kTipo&&kD){
+      for(const row of hist2Rows){
+        const d = excelDate(row[kF]);
+        if(!d) continue;
+        const tipo = cleanType(row[kTipo]);
+        if(!['MEP','CCL','BOPREAL'].includes(tipo)) continue;
+        const y = parseNum(row[kT]);
+        const x = parseNum(row[kD]);
+        const name = row[kE];
+        if(y==null || x==null || name==null) continue;
+        curveAddPoint(tipo, d, {x, y, name:String(name).trim(), refDate:d, include:true});
+      }
+    }
+  }
+
+  Object.keys(curveAll).forEach(t=>{
+    Object.keys(curveAll[t]).forEach(ds=>{
+      curveAll[t][ds].sort((a,b)=>a.x-b.x);
+    });
+  });
+
+  ensureCurveTypeAvailable();
+  selectedCurveDate = null;
+  refreshLatestCurvesFromSelection();
+  curveIncluded = new Map();
+}
+
+
+function solveLinearSystem(A,b){
+  const n = A.length;
+  const M = A.map((row,i)=>row.slice().concat([b[i]]));
+  for(let i=0;i<n;i++){
+    let maxRow = i;
+    for(let k=i+1;k<n;k++) if(Math.abs(M[k][i]) > Math.abs(M[maxRow][i])) maxRow = k;
+    [M[i], M[maxRow]] = [M[maxRow], M[i]];
+    const pivot = M[i][i];
+    if(Math.abs(pivot) < 1e-12) return null;
+    for(let j=i;j<=n;j++) M[i][j] /= pivot;
+    for(let k=0;k<n;k++){
+      if(k===i) continue;
+      const factor = M[k][i];
+      for(let j=i;j<=n;j++) M[k][j] -= factor * M[i][j];
+    }
+  }
+  return M.map(row=>row[n]);
+}
+
+function polynomialFit(points, degree=3, samples=80){
+  if(!points || points.length < 2) return [];
+
+  // Agrupo X casi iguales para que BOPREALES con igual duration no rompan el ajuste.
+  const grouped = new Map();
+  points.forEach(p=>{
+    const key = Number(p.x).toFixed(4);
+    if(!grouped.has(key)) grouped.set(key, {x:p.x, ys:[]});
+    grouped.get(key).ys.push(p.y);
+  });
+
+  const pts = [...grouped.values()].map(g=>({
+    x:g.x,
+    y:g.ys.reduce((a,b)=>a+b,0)/g.ys.length
+  })).sort((a,b)=>a.x-b.x);
+
+  if(pts.length < 2) return [];
+
+  // Mantiene el estilo anterior, pero baja el grado si hay pocos puntos útiles.
+  const d = Math.min(degree, Math.max(1, pts.length - 1));
+
+  const sums = Array(2*d + 1).fill(0);
+  for(const p of pts){
+    for(let i=0;i<=2*d;i++) sums[i] += Math.pow(p.x, i);
+  }
+  const A = Array.from({length:d+1}, (_,i)=>Array.from({length:d+1}, (_,j)=>sums[i+j]));
+  const B = Array.from({length:d+1}, (_,i)=>pts.reduce((acc,p)=>acc + p.y*Math.pow(p.x, i), 0));
+  const coef = solveLinearSystem(A,B);
+  if(!coef) return [];
+
+  const minX = Math.min(...pts.map(p=>p.x));
+  const maxX = Math.max(...pts.map(p=>p.x));
+  if(minX===maxX) return [];
+
+  // Acoto la curva al rango real observado + margen.
+  // Esto evita la "panza" 100%+ cuando todos los puntos reales están cerca de 5%-8%.
+  const yMin = Math.min(...pts.map(p=>p.y));
+  const yMax = Math.max(...pts.map(p=>p.y));
+  const yRange = Math.max(yMax - yMin, 0.01);
+  const pad = Math.max(0.75, yRange * 0.35);
+  const lo = yMin - pad;
+  const hi = yMax + pad;
+
+  const out = [];
+  for(let i=0;i<samples;i++){
+    const x = minX + (maxX-minX)*(i/(samples-1));
+    let y = 0;
+    for(let k=0;k<coef.length;k++) y += coef[k]*Math.pow(x,k);
+    y = Math.max(lo, Math.min(hi, y));
+    out.push({x,y});
+  }
+  return out;
+}
+
+
+function renderTypes(){
+  const box = $('typelist'); box.innerHTML='';
+  if(!types.length){ box.innerHTML='<div style="color:var(--muted);font-size:11px;padding:8px">— sin datos —</div>'; return; }
+  types.forEach((t,i)=>{
+    const row = document.createElement('label');
+    row.className = 'chk'+(t.selected?' on':'');
+    const color = PALETTE[i%PALETTE.length];
+    row.innerHTML = `<input type="checkbox" ${t.selected?'checked':''}><span class="swatch" style="background:${color}"></span><span class="name">${t.name}</span><span class="last">${t.count}</span>`;
+    row.querySelector('input').addEventListener('change',e=>{ t.selected=e.target.checked; row.classList.toggle('on',t.selected); renderSeries(); render(); });
+    box.appendChild(row);
+  });
+}
+function renderSeries(){
+  const box = $('specieslist'); box.innerHTML='';
+  const allowed = activeTypes();
+  const visible = series.filter(s=>allowed.has(s.type));
+  if(!visible.length){ box.innerHTML='<div style="color:var(--muted);font-size:11px;padding:8px">— sin series para esos tipos —</div>'; return; }
+  visible.forEach(s=>{
+    const row = document.createElement('label');
+    row.className = 'chk'+(s.selected?' on':'');
+    row.innerHTML = `<input type="checkbox" ${s.selected?'checked':''}><span class="swatch" style="background:${s.color}"></span><span class="name">${s.name}</span><span class="tag">${s.type}</span><span class="last">${formatVal(s.last,s.scale)}</span>`;
+    row.querySelector('input').addEventListener('change',e=>{ s.selected=e.target.checked; row.classList.toggle('on',s.selected); render(); });
+    box.appendChild(row);
+  });
+}
+function activeRange(){
+  let to=dateMax ? new Date(dateMax.getFullYear(), dateMax.getMonth(), dateMax.getDate(), 23,59,59,999) : null;
+  let from=dateMin ? new Date(dateMin.getFullYear(), dateMin.getMonth(), dateMin.getDate(), 0,0,0,0) : null;
+  if($('to').value) to=dateInputValue($('to').value, true);
+  if($('from').value) from=dateInputValue($('from').value, false);
+  if(win>0 && to) from=new Date(to.getTime()-win*86400*1000);
+  return {from,to};
+}
+
+function render(){
+  if(!RAW.length) return;
+  const {from,to} = activeRange();
+  const allowed = activeTypes();
+  const sel = series.filter(s=>s.selected && allowed.has(s.type));
+  const empty = $('empty');
+  if(!sel.length){
+    empty.style.display='flex'; empty.querySelector('.big').textContent='Ninguna serie seleccionada'; empty.querySelector('div:last-child').textContent='Marcá al menos un tipo y una serie en el panel izquierdo.';
+    if(chart){chart.destroy(); chart=null;} $('metrics').innerHTML=''; return;
+  }
+  empty.style.display='none';
+  const tset = new Set();
+  sel.forEach(s=>RAW.forEach(r=>{ if(r.id===s.id && r.fecha>=from && r.fecha<=to) tset.add(r.fecha.getTime()); }));
+  const times=[...tset].sort((a,b)=>a-b);
+  const labels=times.map(t=>{ const d=new Date(t); return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+String(d.getFullYear()).slice(-2); });
+  const idxByTime=new Map(times.map((t,i)=>[t,i]));
+
+  const datasets = sel.map(s=>{
+    const pts=RAW.filter(r=>r.id===s.id && r.fecha>=from && r.fecha<=to).sort((a,b)=>a.fecha-b.fecha);
+    const base = pts.length ? pts[0].value : 0;
+    const data = new Array(times.length).fill(null);
+    pts.forEach(p=>{ const i=idxByTime.get(p.fecha.getTime()); data[i]=chartVal(p.value,s.scale,base); });
+    return {label:s.name+' · '+s.type, data, borderColor:s.color, backgroundColor:s.color+'33', borderWidth:1.7, pointRadius:3, pointHoverRadius:6, pointStyle:'circle', tension:.2, fill:false, spanGaps:true, _scale:s.scale};
+  });
+
+  drawMetrics(sel, from, to, allowed);
+  const ctx=$('chart').getContext('2d');
+  if(chart) chart.destroy();
+  Chart.defaults.color='#8b949e'; Chart.defaults.font.family="'JetBrains Mono', monospace";
+  chart = new Chart(ctx,{
+    type:'line', data:{labels,datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, resizeDelay:120, interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{labels:{usePointStyle:true, pointStyle:'circle', boxWidth:9, padding:14, font:{size:11}}},
+        tooltip:{backgroundColor:'#161b22', borderColor:'#2a323c', borderWidth:1, titleColor:'#e6edf3', bodyColor:'#e6edf3', padding:10,
+          callbacks:{label:c=>{ if(c.parsed.y==null) return null; const sc=c.dataset._scale; const v=c.parsed.y; if(unit==='delta') return ' '+c.dataset.label+': '+(sc==='pct'?((v>=0?'+':'')+v.toFixed(0)+' bps'):((v>=0?'+':'')+v.toLocaleString('es-AR',{maximumFractionDigits:2}))); return ' '+c.dataset.label+': '+(sc==='pct'?v.toFixed(2)+'%':v.toLocaleString('es-AR',{maximumFractionDigits:2})); }}
+        }
+      },
+      scales:{
+        x:{type:'category', grid:{color:'#21262d'}, ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:12, font:{size:10}}},
+        y:{grid:{color:'#21262d'}, ticks:{font:{size:10}}}
+      }
+    }
+  });
+}
+
+function drawMetrics(sel, from, to, allowed){
+  const days=Math.round((to-from)/86400000);
+  let pctVals=[], deltas=[];
+  sel.forEach(s=>{
+    const pts=RAW.filter(r=>r.id===s.id && r.fecha>=from && r.fecha<=to).sort((a,b)=>a.fecha-b.fecha);
+    pts.forEach(r=>{ if(s.scale==='pct') pctVals.push(r.value); });
+    if(pts.length>=2){ const d=pts[pts.length-1].value-pts[0].value; deltas.push({d,scale:s.scale}); }
+  });
+  const avgPct=pctVals.length?pctVals.reduce((a,b)=>a+b,0)/pctVals.length:null;
+  const mxPct=pctVals.length?Math.max(...pctVals):null;
+  const mnPct=pctVals.length?Math.min(...pctVals):null;
+  const pctDeltas = deltas.filter(x=>x.scale==='pct');
+  const avgDPct=pctDeltas.length?pctDeltas.reduce((a,b)=>a+b.d,0)/pctDeltas.length:null;
+  $('metrics').innerHTML = `
+    ${metric('Tipos', (allowed?allowed.size:0)+' <small>activos</small>')}
+    ${metric('Series', sel.length+' <small>seleccionadas</small>')}
+    ${metric('Ventana', days+' <small>días</small>')}
+    ${metric('Promedio %', avgPct==null?'—':(avgPct*100).toFixed(2)+'<small>%</small>')}
+    ${metric('Rango %', mnPct==null?'—':(mnPct*100).toFixed(2)+'–'+(mxPct*100).toFixed(2)+'<small>%</small>')}
+    ${metric('Δ media %', avgDPct==null?'—':(avgDPct>=0?'+':'')+(avgDPct*10000).toFixed(0)+'<small> bps</small>', avgDPct)}
+  `;
+}
+function metric(k,v,signed){ let col=signed===undefined||signed===null?'':(signed>=0?'style="color:var(--good)"':'style="color:var(--bad)"'); return `<div class="metric"><div class="k">${k}</div><div class="v" ${col}>${v}</div></div>`; }
+
+
+const tickerLabelPlugin = {
+  id:'tickerLabelPlugin',
+  afterDatasetsDraw(chart){
+    const {ctx} = chart;
+    ctx.save();
+    ctx.font = '10px JetBrains Mono, monospace';
+    ctx.textBaseline = 'middle';
+    chart.data.datasets.forEach((dataset, datasetIndex)=>{
+      if(dataset.type !== 'scatter' || dataset._labelPoints === false) return;
+      const meta = chart.getDatasetMeta(datasetIndex);
+      meta.data.forEach((point, i)=>{
+        const raw = dataset.data[i];
+        if(!raw || !raw.name) return;
+        const txt = String(raw.name);
+        ctx.fillStyle = '#c9d1d9';
+        ctx.strokeStyle = '#0d1117';
+        ctx.lineWidth = 3;
+        const x = point.x + 7;
+        const y = point.y - 7;
+        ctx.strokeText(txt, x, y);
+        ctx.fillText(txt, x, y);
+      });
+    });
+    ctx.restore();
+  }
+};
+
+function renderCurveTabs(){
+  const box = $('curveTabs');
+  box.innerHTML = '';
+  ensureCurveTypeAvailable();
+
+  CURVE_ORDER.forEach((t,i)=>{
+    const btn = document.createElement('button');
+    btn.textContent = CURVE_CONFIG[t].label;
+    const hasData = curveAvailableDates(t).length > 0;
+    const active = selectedCurveType === t;
+    btn.className = (active?'active ':'') + (hasData?'':'disabled');
+    btn.disabled = !hasData;
+    btn.style.borderColor = hasData ? PALETTE[(i+2)%PALETTE.length] : '';
+    btn.addEventListener('click', ()=>{
+      if(!hasData) return;
+      selectedCurveType = t;
+      selectedCurveDate = null;
+      curveIncluded = new Map();
+      refreshLatestCurvesFromSelection();
+      renderCurveTabs();
+      renderCurveDateControl();
+      renderCurveInstFilter();
+      renderCurve();
+    });
+    box.appendChild(btn);
+  });
+}
+
+function renderCurveDateControl(){
+  const inp = $('curveDate');
+  if(!inp) return;
+  const dates = curveAvailableDates(selectedCurveType);
+  if(!dates.length){
+    inp.value = '';
+    inp.min = '';
+    inp.max = '';
+    return;
+  }
+  if(!selectedCurveDate || !dates.includes(selectedCurveDate)) selectedCurveDate = dates[dates.length-1];
+  inp.min = dates[0];
+  inp.max = dates[dates.length-1];
+  inp.value = selectedCurveDate;
+}
+
+function curvePointKey(p){ return selectedCurveType+'|'+selectedCurveDate+'|'+p.name; }
+
+function renderCurveInstFilter(){
+  const box = $('curveInstList');
+  if(!box) return;
+  refreshLatestCurvesFromSelection();
+  const points = latestCurves[selectedCurveType] || [];
+  box.innerHTML = '';
+  if(!points.length){
+    box.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">— sin instrumentos —</div>';
+    return;
+  }
+
+  points.forEach(p=>{
+    const k = curvePointKey(p);
+    if(!curveIncluded.has(k)) curveIncluded.set(k, true);
+    const checked = curveIncluded.get(k);
+    const row = document.createElement('label');
+    row.className = 'curve-inst-row';
+    row.innerHTML = `<input type="checkbox" ${checked?'checked':''}><span>${p.name}</span><small>${Number(p.y*100).toFixed(2)}%</small>`;
+    row.querySelector('input').addEventListener('change', e=>{
+      curveIncluded.set(k, e.target.checked);
+      renderCurve();
+    });
+    box.appendChild(row);
+  });
+}
+
+
+function jitterOverlappingX(points){
+  const groups = new Map();
+  points.forEach((p, idx)=>{
+    const key = Number(p.x).toFixed(4);
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(idx);
+  });
+  const xVals = points.map(p=>p.x).filter(Number.isFinite);
+  const span = Math.max(...xVals) - Math.min(...xVals);
+  const step = (span && Number.isFinite(span) ? span : 1) * 0.008;
+  const cloned = points.map(p=>({...p, originalX:p.x}));
+  groups.forEach(indices=>{
+    if(indices.length <= 1) return;
+    const mid = (indices.length - 1) / 2;
+    indices.forEach((idx, k)=>{
+      cloned[idx].x = cloned[idx].x + (k - mid) * step;
+    });
+  });
+  return cloned;
+}
+
+
+
+function curveBaseVolType(type){
+  if(type==='CER2') return 'CER';
+  if(type==='TAMAR2') return 'TAMAR';
+  if(type==='DL2') return 'DL';
+  return type;
+}
+function curveVolumeShareMap(type, dateStr){
+  const baseType = curveBaseVolType(type);
+  const rows = VOL_RAW.filter(r=>r.tipo===baseType && fmtDate(r.fecha)===dateStr);
+  const total = rows.reduce((a,b)=>a+b.volume,0);
+  const byName = new Map();
+
+  rows.forEach(r=>{
+    const rawName = String(r.name).trim();
+    const cleanName = normKey(rawName);
+    byName.set(rawName, (byName.get(rawName)||0) + r.volume);
+    byName.set(cleanName, (byName.get(cleanName)||0) + r.volume);
+  });
+
+  const shares = new Map();
+  byName.forEach((vol,name)=>{
+    shares.set(name, total ? vol/total*100 : 0);
+  });
+  return shares;
+}
+function curvePointShare(volShare, name){
+  const raw = String(name).trim();
+  const clean = normKey(raw);
+  if(volShare.has(raw)) return volShare.get(raw);
+  if(volShare.has(clean)) return volShare.get(clean);
+  return null;
+}
+
+
+
+function renderCurve(){
+  refreshLatestCurvesFromSelection();
+  renderCurveDateControl();
+
+  const empty = $('curveEmpty');
+  const meta = $('curveMeta');
+  const type = selectedCurveType;
+  const rawPoints = latestCurves[type] || [];
+
+  if(!rawPoints.length){
+    empty.style.display='flex';
+    meta.innerHTML='';
+    if(curveChart){ curveChart.destroy(); curveChart = null; }
+    return;
+  }
+
+  empty.style.display='none';
+
+  rawPoints.forEach(p=>{
+    const k = curvePointKey(p);
+    if(!curveIncluded.has(k)) curveIncluded.set(k, true);
+  });
+
+  const points = jitterOverlappingX(rawPoints);
+  const included = points.filter(p=>curveIncluded.get(curvePointKey(p)) !== false);
+  const excluded = points.filter(p=>curveIncluded.get(curvePointKey(p)) === false);
+
+  const info = curveMetaInfo[type] || {};
+  const cfg = CURVE_CONFIG[type];
+  const pointColor = PALETTE[(CURVE_ORDER.indexOf(type)+3)%PALETTE.length];
+  const fitPoints = polynomialFit(included.map(p=>({x:p.x, y:p.y*100})), 3, 80);
+  const volShare = curveVolumeShareMap(type, selectedCurveDate);
+
+  meta.innerHTML = `
+    <div><strong>${cfg.label}:</strong> ${displayDate(info.refDate)} · ${rawPoints.length} inst.</div>
+    <div><strong>Usadas en curva:</strong> ${included.length}</div>
+    <div><strong>Eje X:</strong> ${cfg.xMode==='venc' ? 'años al vencimiento' : 'duration'}</div>
+  `;
+
+  const datasets = [];
+
+  datasets.push({
+    type:'line',
+    label:cfg.label+' · curva interpolante',
+    data:fitPoints,
+    borderColor:pointColor,
+    backgroundColor:pointColor,
+    borderWidth:2.0,
+    pointRadius:0,
+    pointHoverRadius:0,
+    tension:0,
+    fill:false,
+    order:1,
+    _curveType:type,
+    _labelPoints:false
+  });
+
+  datasets.push({
+    type:'scatter',
+    label:cfg.label+' · usadas',
+    data:included.map(p=>({
+      x:p.x,
+      y:p.y*100,
+      name:p.name,
+      venc:p.venc ? displayDate(p.venc) : null,
+      refDate:p.refDate ? displayDate(p.refDate) : null,
+      originalX:p.originalX ?? p.x,
+      opShare: curvePointShare(volShare, p.name),
+        type
+    })),
+    borderColor:'#ffffff',
+    backgroundColor:pointColor,
+    pointRadius:4.4,
+    pointHoverRadius:6.6,
+    pointStyle:'circle',
+    order:2,
+    _curveType:type,
+    _labelPoints:true
+  });
+
+  if(excluded.length){
+    datasets.push({
+      type:'scatter',
+      label:cfg.label+' · excluidas',
+      data:excluded.map(p=>({
+        x:p.x,
+        y:p.y*100,
+        name:p.name,
+        venc:p.venc ? displayDate(p.venc) : null,
+        refDate:p.refDate ? displayDate(p.refDate) : null,
+        originalX:p.originalX ?? p.x,
+        opShare: volShare.has(p.name) ? volShare.get(p.name) : null,
+        type
+      })),
+      borderColor:'#ffffff55',
+      backgroundColor:pointColor+'33',
+      pointRadius:4.0,
+      pointHoverRadius:6.0,
+      pointStyle:'circle',
+      order:3,
+      _curveType:type,
+      _labelPoints:true
+    });
+  }
+
+  const ctx = $('curveChart').getContext('2d');
+  if(curveChart) curveChart.destroy();
+  curveChart = new Chart(ctx, {
+    data:{datasets},
+    plugins:[tickerLabelPlugin],
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      resizeDelay:120,
+      interaction:{mode:'nearest',intersect:true},
+      onClick:(event, elements, chart)=>{
+        const pts = chart.getElementsAtEventForMode(event, 'nearest', {intersect:true}, true);
+        if(!pts || !pts.length) return;
+        const el = pts[0];
+        const ds = chart.data.datasets[el.datasetIndex];
+        if(!ds || ds.type !== 'scatter') return;
+        const raw = ds.data[el.index];
+        if(!raw || !raw.name) return;
+        const k = selectedCurveType+'|'+selectedCurveDate+'|'+raw.name;
+        const current = curveIncluded.has(k) ? curveIncluded.get(k) : true;
+        curveIncluded.set(k, !current);
+        renderCurveInstFilter();
+        renderCurve();
+      },
+      plugins:{
+        legend:{labels:{usePointStyle:true, pointStyle:'circle', boxWidth:10, padding:14, font:{size:11}}},
+        tooltip:{
+          backgroundColor:'#161b22', borderColor:'#2a323c', borderWidth:1, titleColor:'#e6edf3', bodyColor:'#e6edf3', padding:10,
+          callbacks:{
+            title:items=>{
+              const raw = items[0].raw || {};
+              return raw.name || items[0].dataset.label;
+            },
+            label:ctx=>{
+              if(ctx.dataset.type==='line') return null;
+              const p = ctx.raw || {};
+              return 'Tasa: '+Number(p.y).toFixed(2)+'%';
+            },
+            afterLabel:ctx=>{
+              if(ctx.dataset.type==='line') return null;
+              const p = ctx.raw || {};
+              const op = Number(p.opShare);
+              if(Number.isFinite(op)){
+                return 'Operado: '+op.toLocaleString('es-AR',{minimumFractionDigits:1, maximumFractionDigits:1})+'% del tipo';
+              }
+              return 'Operado: s/d';
+            }
+          }
+        }
+      },
+      scales:{
+        x:{
+          type:'linear',
+          title:{display:true, text:cfg.xMode==='venc' ? 'Años al vencimiento' : 'Duration', color:'#8b949e', font:{size:11}},
+          grid:{color:'#21262d'},
+          ticks:{callback:v=>Number(v).toFixed(2), font:{size:10}}
+        },
+        y:{
+          title:{display:true, text:'Tasa (%)', color:'#8b949e', font:{size:11}},
+          grid:{color:'#21262d'},
+          ticks:{callback:v=>Number(v).toFixed(2)+'%', font:{size:10}}
+        }
+      }
+    }
+  });
+}
+
+function fmtMoney(v){
+  if(v==null || !Number.isFinite(v)) return '—';
+  const abs = Math.abs(v);
+  if(abs >= 1e12) return (v/1e12).toLocaleString('es-AR',{maximumFractionDigits:2})+' B';
+  if(abs >= 1e9) return (v/1e9).toLocaleString('es-AR',{maximumFractionDigits:2})+' MM';
+  if(abs >= 1e6) return (v/1e6).toLocaleString('es-AR',{maximumFractionDigits:2})+' M';
+  return v.toLocaleString('es-AR',{maximumFractionDigits:0});
+}
+
+
+function volumeAvailableDates(){
+  return uniqueSortedVolumeDates();
+}
+function ensureVolumeDate(){
+  const dates = volumeAvailableDates();
+  if(!dates.length){
+    selectedVolumeDate = null;
+    return;
+  }
+  if(!selectedVolumeDate || !dates.includes(selectedVolumeDate)){
+    selectedVolumeDate = dates[dates.length-1];
+  }
+}
+function renderVolumeDateControl(){
+  const inp = $('volumeDate');
+  if(!inp) return;
+  const dates = volumeAvailableDates();
+  if(!dates.length){
+    inp.value = '';
+    inp.min = '';
+    inp.max = '';
+    return;
+  }
+  ensureVolumeDate();
+  inp.min = dates[0];
+  inp.max = dates[dates.length-1];
+  inp.value = selectedVolumeDate;
+}
+
+function buildVolumeFilters(){
+  if(!VOL_RAW.length){ volTypes=[]; volInst=[]; return; }
+  ensureVolumeDate();
+  const refStr = selectedVolumeDate || uniqueSortedVolumeDates().slice(-1)[0];
+  const refRows = VOL_RAW.filter(r=>fmtDate(r.fecha)===refStr);
+
+  const typeMap = new Map();
+  refRows.forEach(r=>{
+    typeMap.set(r.tipo, (typeMap.get(r.tipo)||0) + r.volume);
+  });
+
+  volTypes = [...typeMap.entries()]
+    .sort((a,b)=>typeOrder(a[0])-typeOrder(b[0]) || a[0].localeCompare(b[0]))
+    .map(([name,total])=>({name, selected:name===selectedVolDetailType, count:total}));
+
+  if(!volTypes.some(t=>t.name===selectedVolDetailType)){
+    const firstPreferred = ['TF','CER','TAMAR','DL'].find(t=>volTypes.some(x=>x.name===t));
+    selectedVolDetailType = firstPreferred || (volTypes[0] ? volTypes[0].name : 'TF');
+  }
+
+  const instMap = new Map();
+  refRows.forEach(r=>{
+    const key = r.tipo+'|'+r.name;
+    if(!instMap.has(key)) instMap.set(key, {key, name:r.name, tipo:r.tipo, selected:true, lastVol:0});
+    instMap.get(key).lastVol += r.volume;
+  });
+
+  const oldSelected = new Map(volInst.map(i=>[i.key,i.selected]));
+  volInst = [...instMap.values()]
+    .map(i=>({...i, selected:oldSelected.has(i.key) ? oldSelected.get(i.key) : true}))
+    .sort((a,b)=>typeOrder(a.tipo)-typeOrder(b.tipo) || b.lastVol-a.lastVol || a.name.localeCompare(b.name));
+}
+
+function activeVolTypes(){
+  return new Set([selectedVolDetailType]);
+}
+function activeVolInstKeys(){
+  return new Set(volInst.filter(i=>i.selected && i.tipo===selectedVolDetailType).map(i=>i.key));
+}
+function renderVolumeFilters(){
+  const typeBox = $('volTypeList');
+  const instBox = $('volInstList');
+  if(!typeBox || !instBox) return;
+
+  typeBox.innerHTML = '';
+  if(!volTypes.length){
+    typeBox.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">— sin datos —</div>';
+  }else{
+    volTypes.forEach(t=>{
+      const row = document.createElement('label');
+      row.className = 'vol-row';
+      row.innerHTML = `<input type="radio" name="volDetailType" ${t.name===selectedVolDetailType?'checked':''}><span>${t.name}</span><small>${fmtMoney(t.count)}</small>`;
+      row.querySelector('input').addEventListener('change', e=>{
+        selectedVolDetailType = t.name;
+        volTypes.forEach(x=>x.selected = x.name===selectedVolDetailType);
+        renderVolumeFilters();
+        renderVolumeBars();
+      });
+      typeBox.appendChild(row);
+    });
+  }
+
+  const visibleInst = volInst.filter(i=>i.tipo===selectedVolDetailType);
+  instBox.innerHTML = '';
+  if(!visibleInst.length){
+    instBox.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">— sin instrumentos —</div>';
+  }else{
+    visibleInst.forEach(i=>{
+      const row = document.createElement('label');
+      row.className = 'vol-row';
+      row.innerHTML = `<input type="checkbox" ${i.selected?'checked':''}><span>${i.name}</span><small>${fmtMoney(i.lastVol)}</small>`;
+      row.querySelector('input').addEventListener('change', e=>{
+        i.selected = e.target.checked;
+        renderVolumeBars();
+      });
+      instBox.appendChild(row);
+    });
+  }
+}
+function latestSelectedVolumeRows(){
+  if(!VOL_RAW.length) return [];
+  ensureVolumeDate();
+  const refStr = selectedVolumeDate || uniqueSortedVolumeDates().slice(-1)[0];
+  const allowedInst = activeVolInstKeys();
+  const byInst = new Map();
+
+  VOL_RAW.filter(r=>fmtDate(r.fecha)===refStr).forEach(r=>{
+    const key = r.tipo+'|'+r.name;
+    if(r.tipo!==selectedVolDetailType || !allowedInst.has(key)) return;
+    if(!byInst.has(key)) byInst.set(key, {key, tipo:r.tipo, name:r.name, volume:0});
+    byInst.get(key).volume += r.volume;
+  });
+
+  return [...byInst.values()].filter(r=>r.volume>0);
+}
+
+function uniqueSortedVolumeDates(){
+  return [...new Set(VOL_RAW.map(r=>fmtDate(r.fecha)))].sort();
+}
+function aggregateRowsForDate(dateStr, allowedTypes, allowedInst){
+  const byInst = new Map();
+  VOL_RAW.filter(r=>fmtDate(r.fecha)===dateStr).forEach(r=>{
+    const key = r.tipo+'|'+r.name;
+    if(allowedTypes && !allowedTypes.has(r.tipo)) return;
+    if(allowedInst && !allowedInst.has(key)) return;
+    if(!byInst.has(key)) byInst.set(key, {key, tipo:r.tipo, name:r.name, volume:0});
+    byInst.get(key).volume += r.volume;
+  });
+  return [...byInst.values()].filter(r=>r.volume>0);
+}
+function averageRowsForDates(dateList, allowedTypes, allowedInst){
+  const acc = new Map();
+  dateList.forEach(d=>{
+    const rows = aggregateRowsForDate(d, allowedTypes, allowedInst);
+    rows.forEach(r=>{
+      if(!acc.has(r.key)) acc.set(r.key, {key:r.key, tipo:r.tipo, name:r.name, volume:0, count:0});
+      const obj = acc.get(r.key);
+      obj.volume += r.volume;
+      obj.count += 1;
+    });
+  });
+  return [...acc.values()].map(r=>({...r, volume:r.count ? r.volume/r.count : 0})).filter(r=>r.volume>0);
+}
+function typeShares(rows){
+  const total = rows.reduce((a,b)=>a+b.volume,0);
+  const byType = new Map();
+  rows.forEach(r=>byType.set(r.tipo, (byType.get(r.tipo)||0)+r.volume));
+  return {total, byType};
+}
+function instSharesInsideType(rows){
+  const {byType} = typeShares(rows);
+  const byInst = new Map();
+  rows.forEach(r=>{
+    const denom = byType.get(r.tipo)||0;
+    byInst.set(r.key, {...r, shareType:denom ? r.volume/denom*100 : 0});
+  });
+  return byInst;
+}
+
+function renderVolumeBars(){
+  const meta = $('volumeMeta');
+  if(!VOL_RAW.length){
+    if(meta) meta.innerHTML = '<div><strong>Volumen:</strong> sin datos</div>';
+    if(volumeTotalChart){volumeTotalChart.destroy(); volumeTotalChart=null;}
+    if(volumeInsideChart){volumeInsideChart.destroy(); volumeInsideChart=null;}
+    return;
+  }
+
+  ensureVolumeDate();
+  renderVolumeDateControl();
+  buildVolumeFilters();
+
+  const allDates = uniqueSortedVolumeDates();
+  const refStr = selectedVolumeDate || allDates[allDates.length-1];
+  const refIdx = allDates.indexOf(refStr);
+  const refDate = dateInputValue(refStr, false);
+  const prev5Dates = allDates.slice(Math.max(0, refIdx-5), refIdx);
+
+  const fixedGeneralTypes = new Set(['TF','CER','TAMAR','DL']);
+  const generalRows = aggregateRowsForDate(refStr, fixedGeneralTypes, null);
+  const generalAvgRows = averageRowsForDates(prev5Dates, fixedGeneralTypes, null);
+  const {total:generalTotal, byType:generalByType} = typeShares(generalRows);
+  const {total:generalAvgTotal, byType:generalAvgByType} = typeShares(generalAvgRows);
+
+  const allowedTypes = activeVolTypes();
+  const allowedInst = activeVolInstKeys();
+  const rows = aggregateRowsForDate(refStr, allowedTypes, allowedInst);
+  const avgRows = averageRowsForDates(prev5Dates, allowedTypes, allowedInst);
+  const {total:detailTotal} = typeShares(rows);
+
+  meta.innerHTML = `
+    <div><strong>Última rueda:</strong> ${displayDate(refDate)}</div>
+    <div><strong>Composición general:</strong> fija TF/CER/TAMAR/DL</div>
+    <div><strong>Detalle:</strong> ${selectedVolDetailType}</div>
+    <div><strong>Volumen detalle:</strong> ${fmtMoney(detailTotal)}</div>
+  `;
+
+  const typeRows = ['TF','CER','TAMAR','DL'].map(tipo=>{
+    const vol = generalByType.get(tipo)||0;
+    const avgVol = generalAvgByType.get(tipo)||0;
+    return {
+      tipo,
+      volume:vol,
+      avgVolume:avgVol,
+      share:generalTotal ? vol/generalTotal*100 : 0,
+      avgShare:generalAvgTotal ? avgVol/generalAvgTotal*100 : 0
+    };
+  }).filter(r=>r.volume>0 || r.avgVolume>0);
+
+  const generalDatasets = [{
+    label:'Última rueda',
+    data:typeRows.map(r=>r.share),
+    backgroundColor:typeRows.map((r,i)=>PALETTE[(i+4)%PALETTE.length]+'CC'),
+    borderColor:typeRows.map((r,i)=>PALETTE[(i+4)%PALETTE.length]),
+    borderWidth:1
+  }];
+
+  if(showVolumeAvg5){
+    generalDatasets.push({
+      label:'Prom. 5 ruedas previas',
+      data:typeRows.map(r=>r.avgShare),
+      backgroundColor:typeRows.map((r,i)=>PALETTE[(i+4)%PALETTE.length]+'3D'),
+      borderColor:typeRows.map((r,i)=>PALETTE[(i+4)%PALETTE.length]+'99'),
+      borderWidth:1
+    });
+  }
+
+  const ctx1 = $('volumeTotalChart').getContext('2d');
+  if(volumeTotalChart) volumeTotalChart.destroy();
+  volumeTotalChart = new Chart(ctx1,{
+    type:'bar',
+    data:{labels:typeRows.map(r=>r.tipo), datasets:generalDatasets},
+    options:{
+      indexAxis:'y',
+      responsive:true, maintainAspectRatio:false, resizeDelay:120,
+      plugins:{
+        legend:{display:showVolumeAvg5, labels:{usePointStyle:true, pointStyle:'rectRounded', boxWidth:10, padding:12, font:{size:10}}},
+        tooltip:{backgroundColor:'#161b22', borderColor:'#2a323c', borderWidth:1, titleColor:'#e6edf3', bodyColor:'#e6edf3',
+          callbacks:{label:c=>{
+            const r = typeRows[c.dataIndex];
+            if(c.datasetIndex===0) return 'Última rueda: '+r.share.toFixed(1)+'% · '+fmtMoney(r.volume);
+            return 'Prom. 5 ruedas previas: '+r.avgShare.toFixed(1)+'% · '+fmtMoney(r.avgVolume);
+          }}
+        }
+      },
+      scales:{
+        x:{grid:{color:'#21262d'}, max:100, ticks:{callback:v=>v+'%', font:{size:10}}},
+        y:{grid:{display:false}, ticks:{font:{size:10}}}
+      }
+    }
+  });
+
+  const latestInstShares = instSharesInsideType(rows);
+  const avgInstShares = instSharesInsideType(avgRows);
+
+  const keys = showVolumeAvg5
+    ? [...new Set([...latestInstShares.keys(), ...avgInstShares.keys()])]
+    : [...latestInstShares.keys()];
+
+  const instRows = keys.map(key=>{
+    const cur = latestInstShares.get(key);
+    const avg = avgInstShares.get(key);
+    const base = cur || avg;
+    return {
+      key,
+      tipo:base.tipo,
+      name:base.name,
+      volume:cur ? cur.volume : 0,
+      avgVolume:avg ? avg.volume : 0,
+      shareType:cur ? cur.shareType : 0,
+      avgShareType:avg ? avg.shareType : 0
+    };
+  }).filter(r=>r.tipo===selectedVolDetailType && (r.volume>0 || (showVolumeAvg5 && r.avgVolume>0)))
+    .sort((a,b)=>b.shareType-a.shareType)
+    .slice(0,45);
+
+  const detailDatasets = [{
+    label:'Última rueda',
+    data:instRows.map(r=>r.shareType),
+    backgroundColor:instRows.map((r,i)=>PALETTE[(typeOrder(r.tipo)+i)%PALETTE.length]+'CC'),
+    borderColor:instRows.map((r,i)=>PALETTE[(typeOrder(r.tipo)+i)%PALETTE.length]),
+    borderWidth:1
+  }];
+
+  if(showVolumeAvg5){
+    detailDatasets.push({
+      label:'Prom. 5 ruedas previas',
+      data:instRows.map(r=>r.avgShareType),
+      backgroundColor:instRows.map((r,i)=>PALETTE[(typeOrder(r.tipo)+i)%PALETTE.length]+'3D'),
+      borderColor:instRows.map((r,i)=>PALETTE[(typeOrder(r.tipo)+i)%PALETTE.length]+'99'),
+      borderWidth:1
+    });
+  }
+
+  const ctx2 = $('volumeInsideChart').getContext('2d');
+  if(volumeInsideChart) volumeInsideChart.destroy();
+  volumeInsideChart = new Chart(ctx2,{
+    type:'bar',
+    data:{labels:instRows.map(r=>r.name), datasets:detailDatasets},
+    options:{
+      indexAxis:'y',
+      responsive:true, maintainAspectRatio:false, resizeDelay:120,
+      plugins:{
+        legend:{display:showVolumeAvg5, labels:{usePointStyle:true, pointStyle:'rectRounded', boxWidth:10, padding:12, font:{size:10}}},
+        tooltip:{backgroundColor:'#161b22', borderColor:'#2a323c', borderWidth:1, titleColor:'#e6edf3', bodyColor:'#e6edf3',
+          callbacks:{label:c=>{
+            const r = instRows[c.dataIndex];
+            if(c.datasetIndex===0) return 'Última rueda: '+r.shareType.toFixed(1)+'% del '+r.tipo+' · '+fmtMoney(r.volume);
+            return 'Prom. 5 ruedas previas: '+r.avgShareType.toFixed(1)+'% del '+r.tipo+' · '+fmtMoney(r.avgVolume);
+          }}
+        }
+      },
+      scales:{
+        x:{grid:{color:'#21262d'}, max:100, ticks:{callback:v=>v+'%', font:{size:10}}},
+        y:{grid:{display:false}, ticks:{font:{size:9}}}
+      }
+    }
+  });
+}
+
+function renderMixSelector(){
+  const sel = $('mixInstrument');
+  if(!sel) return;
+  const current = sel.value;
+  const options = [...new Map(MIX_RAW.map(r=>[r.key,{key:r.key,name:r.name,tipo:r.tipo}])).values()]
+    .sort((a,b)=>typeOrder(a.tipo)-typeOrder(b.tipo) || a.name.localeCompare(b.name));
+
+  if(!options.length){
+    sel.innerHTML = '<option value="">Cargá un Excel para elegir instrumento</option>';
+    const mf = $('mixFrom'), mt = $('mixTo');
+    if(mf) mf.value='';
+    if(mt) mt.value='';
+    return;
+  }
+
+  sel.innerHTML = options.map(o=>`<option value="${o.key}">${o.name} · ${o.tipo}</option>`).join('');
+  if(current && options.some(o=>o.key===current)) sel.value = current;
+  else sel.value = options[0].key;
+
+  updateMixDateInputs(false);
+}
+
+
+function updateMixDateInputs(forceReset=false){
+  const sel = $('mixInstrument');
+  const mf = $('mixFrom');
+  const mt = $('mixTo');
+  if(!sel || !mf || !mt || !MIX_RAW.length || !sel.value) return;
+
+  const rows = MIX_RAW.filter(r=>r.key===sel.value).sort((a,b)=>a.fecha-b.fecha);
+  if(!rows.length) return;
+
+  const minD = rows[0].fecha;
+  const maxD = rows[rows.length-1].fecha;
+
+  mf.min = fmtDate(minD);
+  mf.max = fmtDate(maxD);
+  mt.min = fmtDate(minD);
+  mt.max = fmtDate(maxD);
+
+  if(forceReset || !mf.value || !mt.value){
+    mt.value = fmtDate(maxD);
+    if(mixWin>0){
+      const f = new Date(maxD.getTime() - mixWin*86400*1000);
+      mf.value = fmtDate(f < minD ? minD : f);
+    }else{
+      mf.value = fmtDate(minD);
+    }
+    return;
+  }
+
+  const from = dateInputValue(mf.value, false);
+  const to = dateInputValue(mt.value, true);
+
+  if(from < minD || from > maxD) mf.value = fmtDate(minD);
+  if(to < minD || to > new Date(maxD.getFullYear(), maxD.getMonth(), maxD.getDate(), 23,59,59,999)) mt.value = fmtDate(maxD);
+}
+
+function setMixWindow(days){
+  mixWin = Number(days) || 0;
+  const btns = $('mixWindows');
+  if(btns){
+    [...btns.children].forEach(b=>b.classList.toggle('active', Number(b.dataset.d)===mixWin));
+  }
+  updateMixDateInputs(true);
+  renderMixChart();
+}
+
+
+function renderMixChart(){
+  const sel = $('mixInstrument');
+  const empty = $('mixEmpty');
+  const meta = $('mixMeta');
+  if(!sel || !MIX_RAW.length || !sel.value){
+    if(empty) empty.style.display='flex';
+    if(meta) meta.innerHTML='';
+    if(mixChart){mixChart.destroy(); mixChart=null;}
+    return;
+  }
+
+  updateMixDateInputs(false);
+
+  const key = sel.value;
+  const mf = $('mixFrom');
+  const mt = $('mixTo');
+  const from = mf && mf.value ? dateInputValue(mf.value, false) : null;
+  const to = mt && mt.value ? dateInputValue(mt.value, true) : null;
+
+  const rows = MIX_RAW
+    .filter(r=>r.key===key)
+    .filter(r=>(!from || r.fecha>=from) && (!to || r.fecha<=to))
+    .sort((a,b)=>a.fecha-b.fecha);
+
+  if(!rows.length){
+    if(empty){
+      empty.style.display='flex';
+      empty.querySelector('.big').textContent='Sin datos en la ventana';
+      empty.querySelector('div:last-child').textContent='Ajustá el filtro de fechas o elegí otro instrumento.';
+    }
+    if(meta) meta.innerHTML='';
+    if(mixChart){mixChart.destroy(); mixChart=null;}
+    return;
+  }
+
+  empty.style.display='none';
+
+  const first = rows[0];
+  const last = rows[rows.length-1];
+  const labels = rows.map(r=>displayDate(r.fecha));
+  const tasaData = rows.map(r=>r.tasa!=null ? r.tasa*100 : null);
+  const beData = rows.map(r=>r.breakeven!=null ? r.breakeven*100 : null);
+  const volData = rows.map(r=>r.volume!=null ? r.volume : null);
+
+  const hasBE = beData.some(v=>v!=null);
+  const hasVol = volData.some(v=>v!=null);
+
+  meta.innerHTML = `
+    <div><strong>Instrumento:</strong> ${first.name}</div>
+    <div><strong>Tipo:</strong> ${first.tipo}</div>
+    <div><strong>Ventana:</strong> ${displayDate(first.fecha)} → ${displayDate(last.fecha)}</div>
+    <div><strong>Ruedas:</strong> ${rows.length}</div>
+  `;
+
+  const datasets = [{
+    label:'Tasa principal',
+    data:tasaData,
+    borderColor:PALETTE[1],
+    backgroundColor:PALETTE[1]+'33',
+    yAxisID:'y',
+    borderWidth:2,
+    pointRadius:3,
+    pointHoverRadius:6,
+    tension:.25,
+    spanGaps:true
+  }];
+
+  if(hasBE){
+    datasets.push({
+      label:'Breakeven',
+      data:beData,
+      borderColor:PALETTE[0],
+      backgroundColor:PALETTE[0]+'33',
+      yAxisID:'y',
+      borderWidth:2,
+      pointRadius:3,
+      pointHoverRadius:6,
+      tension:.25,
+      spanGaps:true
+    });
+  }
+
+  if(hasVol){
+    datasets.push({
+      type:'bar',
+      label:'Monto operado',
+      data:volData,
+      yAxisID:'y1',
+      backgroundColor:PALETTE[2]+'33',
+      borderColor:PALETTE[2]+'99',
+      borderWidth:1,
+      order:2
+    });
+  }
+
+  const ctx = $('mixChart').getContext('2d');
+  if(mixChart) mixChart.destroy();
+
+  mixChart = new Chart(ctx,{
+    type:'line',
+    data:{labels,datasets},
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      resizeDelay:120,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{labels:{usePointStyle:true, pointStyle:'circle', boxWidth:10, padding:14, font:{size:11}}},
+        tooltip:{
+          backgroundColor:'#161b22',
+          borderColor:'#2a323c',
+          borderWidth:1,
+          titleColor:'#e6edf3',
+          bodyColor:'#e6edf3',
+          padding:10,
+          callbacks:{
+            label:c=>{
+              if(c.parsed.y==null) return null;
+              if(c.dataset.yAxisID==='y1') return ' '+c.dataset.label+': '+fmtMoney(c.parsed.y);
+              return ' '+c.dataset.label+': '+c.parsed.y.toFixed(2)+'%';
+            }
+          }
+        }
+      },
+      scales:{
+        x:{grid:{color:'#21262d'}, ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:12, font:{size:10}}},
+        y:{
+          type:'linear',
+          position:'left',
+          title:{display:true,text:'Tasa / Breakeven (%)',color:'#8b949e',font:{size:11}},
+          grid:{color:'#21262d'},
+          ticks:{callback:v=>Number(v).toFixed(1)+'%', font:{size:10}}
+        },
+        y1:{
+          type:'linear',
+          position:'right',
+          display:hasVol,
+          title:{display:hasVol,text:'Monto operado',color:'#8b949e',font:{size:11}},
+          grid:{drawOnChartArea:false},
+          ticks:{callback:v=>fmtMoney(v), font:{size:10}}
+        }
+      }
+    }
+  });
+}
+
+
+
+$('curveDate').addEventListener('change',()=>{
+  selectedCurveDate = $('curveDate').value;
+  curveIncluded = new Map();
+  refreshLatestCurvesFromSelection();
+  renderCurveInstFilter();
+  renderCurve();
+});
+$('curveInstAll').addEventListener('click',()=>{
+  (latestCurves[selectedCurveType]||[]).forEach(p=>curveIncluded.set(curvePointKey(p), true));
+  renderCurveInstFilter();
+  renderCurve();
+});
+$('curveInstNone').addEventListener('click',()=>{
+  (latestCurves[selectedCurveType]||[]).forEach(p=>curveIncluded.set(curvePointKey(p), false));
+  renderCurveInstFilter();
+  renderCurve();
+});
+
+$('windows').addEventListener('click', e=>{
+  if(e.target.tagName!=='BUTTON') return;
+  win=+e.target.dataset.d; [...$('windows').children].forEach(b=>b.classList.toggle('active', b===e.target));
+  if(win>0 && dateMax){ const f=new Date(dateMax.getTime()-win*86400000); $('from').value=fmtDate(f<dateMin?dateMin:f); $('to').value=fmtDate(dateMax); }
+  else if(dateMin){ $('from').value=fmtDate(dateMin); $('to').value=fmtDate(dateMax); }
+  render();
+});
+['from','to'].forEach(id=>$(id).addEventListener('change',()=>{ win=0; [...$('windows').children].forEach(b=>b.classList.toggle('active', b.dataset.d==='0')); render(); }));
+$('unit').addEventListener('click', e=>{ if(e.target.tagName!=='BUTTON') return; unit=e.target.dataset.u; [...$('unit').children].forEach(b=>b.classList.toggle('active', b===e.target)); render(); });
+$('typeAll').addEventListener('click',()=>{types.forEach(t=>t.selected=true);renderTypes();renderSeries();render();});
+$('typeNone').addEventListener('click',()=>{types.forEach(t=>t.selected=false);renderTypes();renderSeries();render();});
+$('selAll').addEventListener('click',()=>{const allowed=activeTypes(); series.forEach(s=>{if(allowed.has(s.type)) s.selected=true;}); renderSeries(); render();});
+$('selNone').addEventListener('click',()=>{const allowed=activeTypes(); series.forEach(s=>{if(allowed.has(s.type)) s.selected=false;}); renderSeries(); render();});
+$('mixInstrument').addEventListener('change',()=>{mixWin=0; if($('mixWindows')) [...$('mixWindows').children].forEach(b=>b.classList.toggle('active', b.dataset.d==='0')); updateMixDateInputs(true); renderMixChart();});
+$('mixWindows').addEventListener('click', e=>{
+  if(e.target.tagName!=='BUTTON') return;
+  setMixWindow(e.target.dataset.d);
+});
+$('mixFrom').addEventListener('change',()=>{mixWin=0; if($('mixWindows')) [...$('mixWindows').children].forEach(b=>b.classList.toggle('active', b.dataset.d==='0')); renderMixChart();});
+$('mixTo').addEventListener('change',()=>{mixWin=0; if($('mixWindows')) [...$('mixWindows').children].forEach(b=>b.classList.toggle('active', b.dataset.d==='0')); renderMixChart();});
+
+$('volumeDate').addEventListener('change',()=>{
+  selectedVolumeDate = $('volumeDate').value;
+  buildVolumeFilters();
+  renderVolumeFilters();
+  renderVolumeBars();
+});
+
+$('volTypeAll').addEventListener('click',()=>{if(volTypes.some(t=>t.name==='TF')) selectedVolDetailType='TF'; renderVolumeFilters(); renderVolumeBars();});
+$('volTypeNone').addEventListener('click',()=>{if(volTypes.some(t=>t.name==='CER')) selectedVolDetailType='CER'; renderVolumeFilters(); renderVolumeBars();});
+$('volInstAll').addEventListener('click',()=>{const allowed=activeVolTypes(); volInst.forEach(i=>{if(allowed.has(i.tipo)) i.selected=true;}); renderVolumeFilters(); renderVolumeBars();});
+$('volInstNone').addEventListener('click',()=>{const allowed=activeVolTypes(); volInst.forEach(i=>{if(allowed.has(i.tipo)) i.selected=false;}); renderVolumeFilters(); renderVolumeBars();});
+
+// ── Tab switching ────────────────────────────────────────────────────────────
+document.querySelectorAll('.mtab').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.mtab').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab = btn.dataset.tab;
+    $('tab-dashboard').style.display = tab==='dashboard' ? '' : 'none';
+    const fwdEl = $('tab-forwards');
+    fwdEl.style.display = tab==='forwards' ? 'flex' : 'none';
+    if(tab==='forwards') renderFwdChart();
+  });
+});
+
+// ── Forwards implícitas ──────────────────────────────────────────────────────
+let fwdPairs = [];   // [{id, tipo, inst1, inst2, color}]
+let fwdChartInst = null;
+
+// Convención de tasa por tipo: TF usa TEM, resto TEA
+// t = (vencimiento - fecha) / 365  (ya está como x en curveAll en años)
+// Forward: [(1+R2)^t2 / (1+R1)^t1]^(1/(t2-t1)) - 1
+
+function fwdConvLabel(tipo){
+  return tipo === 'TF' ? 'TEM' : 'TEA';
+}
+
+function calcForwardSeries(tipo, inst1, inst2){
+  // Recopila todos los dates donde ambos instrumentos tienen datos
+  const allDates = Object.keys(curveAll[tipo] || {}).sort();
+  const result = [];
+  for(const ds of allDates){
+    const pts = curveAll[tipo][ds];
+    const p1 = pts.find(p => p.name === inst1);
+    const p2 = pts.find(p => p.name === inst2);
+    if(!p1 || !p2) continue;
+    const t1 = p1.x;  // años al vto desde esa fecha
+    const t2 = p2.x;
+    const R1 = p1.y;  // tasa (ej 0.05 = 5%)
+    const R2 = p2.y;
+    if(t2 <= t1 || t1 <= 0 || t2 <= 0) continue;
+    const dt = t2 - t1;
+    const fwd = Math.pow((1 + R2) / (1 + R1), t2 / dt) * Math.pow(1 + R1, -t1 / dt) - 1;
+    // Equivalente limpio: [(1+R2)^t2 / (1+R1)^t1]^(1/dt) - 1
+    const fwdClean = Math.pow(Math.pow(1+R2, t2) / Math.pow(1+R1, t1), 1/dt) - 1;
+    if(!Number.isFinite(fwdClean)) continue;
+    const [y,m,d] = ds.split('-').map(Number);
+    result.push({ fecha: new Date(y,m-1,d,12,0,0), value: fwdClean });
+  }
+  return result;
+}
+
+function fwdInstOptions(tipo){
+  // Devuelve la lista de nombres únicos disponibles para ese tipo en curveAll
+  const names = new Set();
+  Object.values(curveAll[tipo] || {}).forEach(pts => pts.forEach(p => names.add(p.name)));
+  return [...names].sort();
+}
+
+function renderFwdTipoSelect(){
+  const sel = $('fwdTipo');
+  const tipos = ['TF','CER','TAMAR','DL'].filter(t => Object.keys(curveAll[t]||{}).length > 0);
+  if(!tipos.length){ sel.innerHTML='<option value="">— sin datos —</option>'; return; }
+  sel.innerHTML = tipos.map(t=>`<option value="${t}">${t} (${fwdConvLabel(t)})</option>`).join('');
+  fwdUpdateInstSelects();
+}
+
+function fwdUpdateInstSelects(){
+  const tipo = $('fwdTipo').value;
+  const names = fwdInstOptions(tipo);
+  const opts = names.map(n=>`<option value="${n}">${n}</option>`).join('');
+  $('fwdInst1').innerHTML = '<option value="">—</option>' + opts;
+  $('fwdInst2').innerHTML = '<option value="">—</option>' + opts;
+}
+
+$('fwdTipo') && $('fwdTipo').addEventListener('change', fwdUpdateInstSelects);
+
+function fwdAddPair(){
+  const tipo  = $('fwdTipo').value;
+  const inst1 = $('fwdInst1').value;
+  const inst2 = $('fwdInst2').value;
+  if(!tipo || !inst1 || !inst2){ alert('Seleccioná tipo e instrumentos.'); return; }
+  if(inst1 === inst2){ alert('Los instrumentos deben ser distintos.'); return; }
+  // Asegurar que inst1 es el corto (menor t en la última fecha disponible)
+  const lastDate = Object.keys(curveAll[tipo]||{}).sort().at(-1);
+  if(lastDate){
+    const pts = curveAll[tipo][lastDate];
+    const p1 = pts.find(p=>p.name===inst1);
+    const p2 = pts.find(p=>p.name===inst2);
+    if(p1 && p2 && p1.x > p2.x){
+      alert(`${inst1} vence más tarde que ${inst2}. Invertí el orden: el corto va en R₁.`);
+      return;
+    }
+  }
+  const id = tipo+'|'+inst1+'|'+inst2;
+  if(fwdPairs.find(p=>p.id===id)){ alert('Par ya agregado.'); return; }
+  fwdPairs.push({ id, tipo, inst1, inst2, color: PALETTE[fwdPairs.length % PALETTE.length] });
+  renderFwdPairTags();
+  renderFwdChart();
+}
+
+function fwdRemovePair(id){
+  fwdPairs = fwdPairs.filter(p=>p.id!==id);
+  renderFwdPairTags();
+  renderFwdChart();
+}
+
+function renderFwdPairTags(){
+  const box = $('fwdPairs');
+  if(!fwdPairs.length){ box.innerHTML=''; return; }
+  box.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px">' +
+    fwdPairs.map(p=>{
+      const series = calcForwardSeries(p.tipo, p.inst1, p.inst2);
+      const last = series.length ? (series.at(-1).value*100).toFixed(2)+'%' : '—';
+      const conv = fwdConvLabel(p.tipo);
+      return `<span class="fwd-pair-tag">
+        <span class="dot" style="background:${p.color}"></span>
+        <span class="lbl">${p.tipo} · ${p.inst1} → ${p.inst2}</span>
+        <span class="last-val">${last} ${conv}</span>
+        <button onclick="fwdRemovePair('${p.id}')" title="Quitar">×</button>
+      </span>`;
+    }).join('') + '</div>';
+}
+
+function renderFwdChart(){
+  const canvas = $('fwdChart');
+  const empty  = $('fwdEmpty');
+  if(!fwdPairs.length){
+    empty.style.display='flex'; canvas.style.display='none';
+    if(fwdChartInst){ fwdChartInst.destroy(); fwdChartInst=null; }
+    return;
+  }
+  empty.style.display='none'; canvas.style.display='block';
+
+  const datasets = fwdPairs.map(p=>{
+    const series = calcForwardSeries(p.tipo, p.inst1, p.inst2);
+    const conv = fwdConvLabel(p.tipo);
+    return {
+      label: `${p.tipo} · ${p.inst1}→${p.inst2} (${conv})`,
+      data: series.map(s=>({ x: fmtDate(s.fecha), y: parseFloat((s.value*100).toFixed(4) )})),
+      borderColor: p.color,
+      backgroundColor: p.color+'33',
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      borderWidth: 2,
+      tension: 0.3,
+      fill: false
+    };
+  });
+
+  if(fwdChartInst) fwdChartInst.destroy();
+  fwdChartInst = new Chart(canvas, {
+    type:'line',
+    data:{ datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false, resizeDelay:120,
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ display:true, position:'top', labels:{ color:'#8b949e', font:{family:"'JetBrains Mono',monospace",size:11}, boxWidth:12, padding:16 }},
+        tooltip:{
+          backgroundColor:'#1c232c', borderColor:'#2a323c', borderWidth:1,
+          titleColor:'#e6edf3', bodyColor:'#8b949e', padding:10,
+          callbacks:{
+            label: item => ` ${item.dataset.label}: ${item.raw.y.toFixed(2)}%`
+          }
+        }
+      },
+      scales:{
+        x:{ type:'category',
+            grid:{ color:'#2a323c' },
+            ticks:{ color:'#8b949e', font:{size:10}, maxRotation:0, autoSkip:true, maxTicksLimit:14,
+              callback: function(val){ const v=this.getLabelForValue(val); return v ? v.slice(5)+'/'+v.slice(0,4) : ''; }
+            }},
+        y:{ grid:{ color:'#2a323c' }, ticks:{ color:'#8b949e', font:{size:11},
+            callback: v => v.toFixed(2)+'%' },
+            title:{ display:true, text:'Forward implícita (%)', color:'#8b949e', font:{size:11} }}
+      }
+    }
+  });
+}
+
+// Hook: cuando se cargan datos nuevos, actualizar selectores de forwards
+const _origParseWB = parseWorkbook;
+// Se llama renderFwdTipoSelect desde el hook al final de parseWorkbook
+function fwdOnDataLoad(){ renderFwdTipoSelect(); renderFwdPairTags(); renderFwdChart(); }
+
+function setStatus(t,c){ const el=$('status'); el.textContent=t; el.className='status'+(c?' '+c:''); }
+</script>
+</body>
+</html>
