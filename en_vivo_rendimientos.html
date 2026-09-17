@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rendimientos ARS — En Vivo</title>
+<style>
+:root{
+  --bg:#0b0d10; --bg2:#12151a; --bg3:#181c22; --line:#262b33;
+  --text:#e7ebf0; --text-dim:#8b95a3; --text-faint:#5a6472;
+  --accent:#4fd1a5; --accent-dim:#2c8563; --warn:#e8a33d; --bad:#e8615f;
+  --mono: 'JetBrains Mono','SF Mono',ui-monospace,Consolas,monospace;
+  --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+body{min-height:100vh;}
+.wrap{max-width:1400px;margin:0 auto;padding:20px 20px 60px;}
+header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:18px;}
+h1{font-size:20px;font-weight:600;margin:0;letter-spacing:.2px;}
+h1 span{color:var(--accent);}
+.subhead{font-size:12.5px;color:var(--text-dim);font-family:var(--mono);}
+.status-row{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-dim);font-family:var(--mono);}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;background:var(--text-faint);}
+.dot.ok{background:var(--accent);box-shadow:0 0 6px var(--accent);}
+.dot.bad{background:var(--bad);}
+.dot.warn{background:var(--warn);}
+
+.inputs-bar{display:flex;gap:18px;flex-wrap:wrap;align-items:center;background:var(--bg2);
+  border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:18px;font-size:12.5px;}
+.inputs-bar label{color:var(--text-dim);margin-right:6px;}
+.inputs-bar input{background:var(--bg3);border:1px solid var(--line);color:var(--text);
+  font-family:var(--mono);font-size:12.5px;border-radius:5px;padding:4px 8px;width:110px;}
+.inputs-bar input:focus{outline:none;border-color:var(--accent-dim);}
+.inputs-bar .grp{display:flex;align-items:center;}
+.inputs-bar .note{color:var(--text-faint);font-size:11px;}
+
+.tabs{display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap;border-bottom:1px solid var(--line);}
+.tab{padding:9px 16px;font-size:13px;color:var(--text-dim);cursor:pointer;border-bottom:2px solid transparent;
+  font-weight:500;user-select:none;transition:color .15s;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tab .cnt{color:var(--text-faint);font-size:11px;margin-left:4px;}
+
+.panel{display:none;}
+.panel.active{display:block;}
+.panel-desc{font-size:12.5px;color:var(--text-dim);margin:0 0 12px;max-width:760px;line-height:1.5;}
+
+table{width:100%;border-collapse:collapse;font-size:13px;}
+thead th{text-align:right;font-weight:600;color:var(--text-dim);font-size:11px;text-transform:none;
+  padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap;font-family:var(--mono);}
+thead th:first-child,thead th:nth-child(2){text-align:left;}
+thead th:hover{color:var(--text);}
+thead th.sorted{color:var(--accent);}
+tbody td{padding:8px 10px;border-bottom:1px solid #1a1e24;text-align:right;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;white-space:nowrap;}
+tbody td:first-child{text-align:left;font-weight:600;color:var(--text);font-family:var(--sans);}
+tbody td:nth-child(2){text-align:left;color:var(--text-dim);font-size:12px;}
+tbody tr:hover{background:var(--bg2);}
+.pos{color:var(--accent);}
+.neg{color:var(--bad);}
+.dimval{color:var(--text-faint);}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--bg2);}
+
+.err-row{color:var(--bad);font-size:12px;padding:10px;}
+footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);
+  color:var(--text-faint);font-size:11px;line-height:1.6;}
+footer code{background:var(--bg3);padding:1px 5px;border-radius:3px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Rendimientos <span>ARS</span> — En Vivo</h1>
+      <div class="subhead" id="fechaLine">cargando fechas...</div>
+    </div>
+    <div class="status-row">
+      <span><span class="dot" id="dotPrices"></span>precios data912 <span id="tsPrices">—</span></span>
+      <span><span class="dot" id="dotBcra"></span>CER/TAMAR/A3500 <span id="tsBcra">—</span></span>
+    </div>
+  </header>
+
+  <div class="inputs-bar">
+    <div class="grp">
+      <label for="inpA3500">A3500 hoy</label>
+      <input type="text" id="inpA3500" placeholder="1500,00">
+    </div>
+    <span class="note">Usado para Dollar-Linked · se precarga con el último valor publicado en tu Sheet, editalo si tenés uno más fresco</span>
+  </div>
+
+  <div class="tabs" id="tabsRow"></div>
+
+  <div id="panels"></div>
+
+  <footer>
+    Precios: <code>data912.com</code> (/live/arg_notes + /live/arg_bonds), refresco automático cada 45s ·
+    CER/TAMAR/A3500: hoja BCRA publicada como CSV, refresco cada 8 min (cacheado por Google) ·
+    Liquidación T+1 sobre feriados AR cargados hasta 2026-12-31 — actualizar el array <code>FERIADOS</code> en enero con el calendario 2027 ·
+    TF/CER/TAMAR/Soberanos: réplica directa de las fórmulas de tu Sheet "EN VIVO" · DL: solo cálculo principal (TNA/TEA real), sintéticos con futuro ROFEX pendientes ·
+    Rendimientos reales/en terminos del índice — no incluyen proyección de inflación (REM) ni de A3500 futuro.
+  </footer>
+</div>
+<script>
+"use strict";
+
+/* ============================== DATOS ESTÁTICOS ==============================
+   Extraídos de tu Google Sheet "EN VIVO". Hay que mantenerlos a mano:
+   agregar nuevas licitaciones (TF/CER/TAMAR/DL) y sacar las que ya vencieron
+   (aunque el código también filtra automáticamente las vencidas por fecha). */
+
+const FERIADOS = ["2024-01-01", "2024-02-12", "2024-02-13", "2024-03-28", "2024-03-29", "2024-04-01", "2024-04-02", "2024-05-01", "2024-06-17", "2024-06-20", "2024-06-21", "2024-07-09", "2024-10-11", "2024-11-06", "2024-11-18", "2024-12-24", "2024-12-25", "2024-12-31", "2025-01-01", "2025-03-03", "2025-03-04", "2025-03-24", "2025-04-02", "2025-04-17", "2025-04-18", "2025-05-01", "2025-05-02", "2025-06-16", "2025-06-20", "2025-07-09", "2025-08-15", "2025-10-10", "2025-11-06", "2025-11-21", "2025-11-24", "2025-12-08", "2025-12-24", "2025-12-25", "2025-12-31", "2026-01-01", "2026-02-16", "2026-02-17", "2026-03-23", "2026-03-24", "2026-04-02", "2026-04-03", "2026-05-01", "2026-05-25", "2026-06-15", "2026-07-09", "2026-07-10", "2026-08-17", "2026-10-12", "2026-11-06", "2026-11-23", "2026-12-07", "2026-12-08", "2026-12-24", "2026-12-25", "2026-12-31"];
+
+const TF = [{"t": "T30J6", "pago": 144.9, "vto": "2026-06-30"}, {"t": "TTJ26", "pago": 162.398, "vto": "2026-06-30"}, {"t": "TZV26", "pago": 147729.91, "vto": "2026-06-30"}, {"t": "S31G6", "pago": 127.06, "vto": "2026-08-31"}, {"t": "S15S6", "pago": 107.21, "vto": "2026-09-15"}, {"t": "X30S6", "pago": 117.575, "vto": "2026-09-30"}, {"t": "S30S6", "pago": 117.54, "vto": "2026-09-30"}, {"t": "S16O6", "pago": 105.273, "vto": "2026-10-16"}, {"t": "S30O6", "pago": 135.28, "vto": "2026-10-30"}, {"t": "S13N6", "pago": 109.651, "vto": "2026-11-13"}, {"t": "S30N6", "pago": 129.89, "vto": "2026-11-30"}, {"t": "T15E7", "pago": 161.1, "vto": "2027-01-15"}, {"t": "S29E7", "pago": 111.684, "vto": "2027-01-29"}, {"t": "T30A7", "pago": 157.34, "vto": "2027-04-30"}, {"t": "T31Y7", "pago": 151.56, "vto": "2027-05-31"}, {"t": "T30J7", "pago": 156.04, "vto": "2027-06-30"}];          // {t, pago, vto}   -> Tasa Fija (LECAP/BONCAP)
+const CER = [{"t": "TZXO6", "emis": "2024-10-31", "cerFix": null, "vto": "2026-10-30"}, {"t": "TX26", "emis": null, "cerFix": 22.544, "vto": "2026-11-09"}, {"t": "X30N6", "emis": "2025-12-15", "cerFix": null, "vto": "2026-11-30"}, {"t": "TZXD6", "emis": "2024-03-15", "cerFix": null, "vto": "2026-12-15"}, {"t": "X29E7", "emis": "2026-08-14", "cerFix": null, "vto": "2027-01-29"}, {"t": "TZXM7", "emis": "2024-05-20", "cerFix": null, "vto": "2027-03-31"}, {"t": "TZXA7", "emis": "2025-11-29", "cerFix": null, "vto": "2027-04-30"}, {"t": "TZXY7", "emis": "2025-12-15", "cerFix": null, "vto": "2027-05-31"}, {"t": "TZX27", "emis": "2024-02-01", "cerFix": null, "vto": "2027-06-30"}, {"t": "TZXS7", "emis": "2026-03-31", "cerFix": null, "vto": "2027-09-30"}, {"t": "TZXO7", "emis": "2026-06-30", "cerFix": null, "vto": "2027-10-29"}, {"t": "TX28", "emis": null, "cerFix": 22.544, "vto": "2028-11-09"}, {"t": "TZXD7", "emis": "2024-03-15", "cerFix": null, "vto": "2027-12-15"}, {"t": "TZXM8", "emis": "2026-03-31", "cerFix": 723.06, "vto": "2028-03-31"}, {"t": "TZX28", "emis": "2024-02-01", "cerFix": null, "vto": "2028-06-30"}, {"t": "TXMJ8", "emis": "2026-05-15", "cerFix": null, "vto": "2028-06-30"}, {"t": "TZXS8", "emis": "2026-03-31", "cerFix": null, "vto": "2028-09-30"}, {"t": "TXMD8", "emis": "2026-06-12", "cerFix": null, "vto": "2028-12-15"}, {"t": "TZXD8", "emis": "2026-06-30", "cerFix": null, "vto": "2028-12-15"}, {"t": "TZXM9", "emis": "2026-03-31", "cerFix": null, "vto": "2029-03-28"}, {"t": "TXMJ9", "emis": "2026-04-30", "cerFix": null, "vto": "2029-06-29"}, {"t": "DICP", "emis": null, "cerFix": 1.4551, "vto": "2033-12-31"}, {"t": "TXMD9", "emis": "2026-06-12", "cerFix": null, "vto": "2029-12-14"}];        // {t, emis, cerFix, vto}
+const TAMAR = [{"t": "M31G6", "emis": "2025-11-10", "margen": 5.0, "vto": "2026-08-31"}, {"t": "TTS26", "emis": "2025-01-29", "margen": 0.0, "vto": "2026-09-15"}, {"t": "TTD26", "emis": "2025-01-29", "margen": 0.0, "vto": "2026-12-15"}, {"t": "TMF27", "emis": "2026-02-13", "margen": 6.5, "vto": "2027-02-26"}, {"t": "TML27", "emis": "2026-06-30", "margen": 5.4, "vto": "2027-07-30"}, {"t": "TMG27", "emis": "2026-03-31", "margen": 6.0, "vto": "2027-08-31"}, {"t": "TMVE8", "emis": "2026-07-31", "margen": 0.0, "vto": "2028-01-31"}, {"t": "TMF28", "emis": "2026-04-20", "margen": 6.5, "vto": "2028-02-25"}, {"t": "TMG28", "emis": "2026-04-30", "margen": 6.9, "vto": "2028-08-31"}, {"t": "TXMJ8", "emis": "2026-05-15", "margen": 3.0, "vto": "2028-06-30"}, {"t": "TXMD8", "emis": "2026-06-12", "margen": 3.0, "vto": "2028-12-15"}, {"t": "TXMJ9", "emis": "2026-04-30", "margen": 3.0, "vto": "2029-06-29"}, {"t": "TXMD9", "emis": "2026-06-12", "margen": 3.0, "vto": "2029-12-14"}, {"t": "TXMJ0", "emis": "2026-06-12", "margen": 3.0, "vto": "2030-06-28"}];    // {t, emis, margen, vto}
+const DL = [{"t": "D31G6", "vto": "2026-08-31"}, {"t": "D30S6", "vto": "2026-09-30"}, {"t": "D30O6", "vto": "2026-10-30"}, {"t": "D30N6", "vto": "2026-11-30"}, {"t": "D15E7", "vto": "2027-01-15"}, {"t": "D31M7", "vto": "2027-03-31"}, {"t": "D10Y7", "vto": "2027-05-10"}, {"t": "TZV27", "vto": "2027-06-30"}, {"t": "TMVE8", "vto": "2028-01-31"}, {"t": "TZV28", "vto": "2028-06-30"}, {"t": "TZVD8", "vto": "2028-12-15"}];          // {t, vto}
+const SOBERANOS_META = [{"t": "BPA7D", "tipo": "BOPREAL"}, {"t": "BPB7D", "tipo": "BOPREAL"}, {"t": "BPC7D", "tipo": "BOPREAL"}, {"t": "BPD7D", "tipo": "BOPREAL"}, {"t": "BPB8D", "tipo": "BOPREAL"}, {"t": "BPA8D", "tipo": "BOPREAL"}, {"t": "AO27D", "tipo": "MEP"}, {"t": "AO28D", "tipo": "MEP"}, {"t": "AO29D", "tipo": "MEP"}, {"t": "AN29D", "tipo": "MEP"}, {"t": "AL29D", "tipo": "MEP"}, {"t": "AL30D", "tipo": "MEP"}, {"t": "AL35D", "tipo": "MEP"}, {"t": "AE38D", "tipo": "MEP"}, {"t": "AL41D", "tipo": "MEP"}, {"t": "GD29C", "tipo": "CCL"}, {"t": "GD30C", "tipo": "CCL"}, {"t": "GD35C", "tipo": "CCL"}, {"t": "GD38C", "tipo": "CCL"}, {"t": "GD41C", "tipo": "CCL"}];   // {t, tipo}
+const SOBERANOS_CF = {"BPA7D": [{"d": "2026-10-31", "f": 2.5}, {"d": "2027-04-30", "f": 52.5}, {"d": "2027-11-01", "f": 51.25}], "BPB7D": [{"d": "2026-04-30", "f": 2.5}, {"d": "2026-10-31", "f": 2.5}, {"d": "2027-04-30", "f": 52.5}, {"d": "2027-11-01", "f": 51.25}], "BPC7D": [{"d": "2026-04-30", "f": 2.5}, {"d": "2026-10-31", "f": 2.5}, {"d": "2027-04-30", "f": 52.5}, {"d": "2027-11-01", "f": 51.25}], "BPD7D": [{"d": "2026-04-30", "f": 2.5}, {"d": "2026-10-31", "f": 2.5}, {"d": "2027-04-30", "f": 52.5}, {"d": "2027-11-01", "f": 51.25}], "BPB8D": [{"d": "2026-04-30", "f": 1.5}, {"d": "2026-10-30", "f": 1.5}, {"d": "2027-04-30", "f": 1.5}, {"d": "2027-10-30", "f": 1.5}, {"d": "2028-04-30", "f": 1.5}, {"d": "2028-10-30", "f": 101.5}], "BPA8D": [{"d": "2026-04-30", "f": 1.5}, {"d": "2026-10-30", "f": 1.5}, {"d": "2027-04-30", "f": 1.5}, {"d": "2027-10-30", "f": 1.5}, {"d": "2028-04-30", "f": 1.5}, {"d": "2028-10-30", "f": 101.5}], "AL29D": [{"d": "2026-07-09", "f": 10.35}, {"d": "2027-01-11", "f": 10.3}, {"d": "2027-07-09", "f": 10.25}, {"d": "2028-01-10", "f": 10.2}, {"d": "2028-07-10", "f": 10.15}, {"d": "2029-01-09", "f": 10.1}, {"d": "2029-07-09", "f": 10.05}], "AL30D": [{"d": "2026-07-09", "f": 8.27}, {"d": "2027-01-11", "f": 8.24}, {"d": "2027-07-09", "f": 8.21}, {"d": "2028-01-10", "f": 8.42}, {"d": "2028-07-10", "f": 8.35}, {"d": "2029-01-09", "f": 8.28}, {"d": "2029-07-09", "f": 8.21}, {"d": "2030-01-09", "f": 8.14}, {"d": "2030-07-09", "f": 8.07}], "AL35D": [{"d": "2026-07-09", "f": 2.0625}, {"d": "2027-01-11", "f": 2.0625}, {"d": "2027-07-09", "f": 2.0625}, {"d": "2028-01-10", "f": 2.375}, {"d": "2028-07-10", "f": 2.375}, {"d": "2029-01-09", "f": 2.5}, {"d": "2029-07-09", "f": 2.5}, {"d": "2030-01-09", "f": 2.5}, {"d": "2030-07-09", "f": 2.5}, {"d": "2031-01-09", "f": 12.5}, {"d": "2031-07-09", "f": 12.25}, {"d": "2032-01-09", "f": 12.0}, {"d": "2032-07-09", "f": 11.75}, {"d": "2033-01-10", "f": 11.5}, {"d": "2033-07-11", "f": 11.25}, {"d": "2034-01-09", "f": 11.0}, {"d": "2034-07-10", "f": 10.75}, {"d": "2035-01-09", "f": 10.5}, {"d": "2035-07-09", "f": 10.25}], "AL41D": [{"d": "2026-07-09", "f": 1.75}, {"d": "2027-01-11", "f": 1.75}, {"d": "2027-07-09", "f": 1.75}, {"d": "2028-01-10", "f": 5.321428571}, {"d": "2028-07-10", "f": 5.258928571}, {"d": "2029-01-09", "f": 5.196428571}, {"d": "2029-07-09", "f": 5.133928571}, {"d": "2030-01-09", "f": 5.660714286}, {"d": "2030-07-09", "f": 5.573660714}, {"d": "2031-01-09", "f": 5.486607143}, {"d": "2031-07-09", "f": 5.399553571}, {"d": "2032-01-09", "f": 5.3125}, {"d": "2032-07-09", "f": 5.225446429}, {"d": "2033-01-10", "f": 5.138392857}, {"d": "2033-07-11", "f": 5.051339286}, {"d": "2034-01-09", "f": 4.964285714}, {"d": "2034-07-10", "f": 4.877232143}, {"d": "2035-01-09", "f": 4.790178571}, {"d": "2035-07-09", "f": 4.703125}, {"d": "2036-01-09", "f": 4.616071429}, {"d": "2036-07-09", "f": 4.529017857}, {"d": "2037-01-09", "f": 4.441964286}, {"d": "2037-07-09", "f": 4.354910714}, {"d": "2038-01-11", "f": 4.267857143}, {"d": "2038-07-09", "f": 4.180803571}, {"d": "2039-01-10", "f": 4.09375}, {"d": "2039-07-11", "f": 4.006696429}, {"d": "2040-01-09", "f": 3.919642857}, {"d": "2040-07-09", "f": 3.832589286}, {"d": "2041-01-09", "f": 3.745535714}, {"d": "2041-07-09", "f": 3.658482143}], "AE38D": [{"d": "2026-07-09", "f": 2.5}, {"d": "2027-01-11", "f": 2.5}, {"d": "2027-07-09", "f": 7.045454545}, {"d": "2028-01-10", "f": 6.931818182}, {"d": "2028-07-10", "f": 6.818181818}, {"d": "2029-01-09", "f": 6.704545455}, {"d": "2029-07-09", "f": 6.590909091}, {"d": "2030-01-09", "f": 6.477272727}, {"d": "2030-07-09", "f": 6.363636364}, {"d": "2031-01-09", "f": 6.25}, {"d": "2031-07-09", "f": 6.136363636}, {"d": "2032-01-09", "f": 6.022727273}, {"d": "2032-07-09", "f": 5.909090909}, {"d": "2033-01-10", "f": 5.795454545}, {"d": "2033-07-11", "f": 5.681818182}, {"d": "2034-01-09", "f": 5.568181818}, {"d": "2034-07-10", "f": 5.454545455}, {"d": "2035-01-09", "f": 5.340909091}, {"d": "2035-07-09", "f": 5.227272727}, {"d": "2036-01-09", "f": 5.113636364}, {"d": "2036-07-09", "f": 5.0}, {"d": "2037-01-09", "f": 4.886363636}, {"d": "2037-07-09", "f": 4.772727273}, {"d": "2038-01-11", "f": 4.659090909}], "GD29C": [{"d": "2026-07-09", "f": 10.35}, {"d": "2027-01-11", "f": 10.3}, {"d": "2027-07-09", "f": 10.25}, {"d": "2028-01-10", "f": 10.2}, {"d": "2028-07-10", "f": 10.15}, {"d": "2029-01-09", "f": 10.1}, {"d": "2029-07-09", "f": 10.05}], "GD30C": [{"d": "2026-07-09", "f": 8.2625}, {"d": "2027-01-11", "f": 8.24}, {"d": "2027-07-09", "f": 8.21}, {"d": "2028-01-10", "f": 8.42}, {"d": "2028-07-10", "f": 8.35}, {"d": "2029-01-09", "f": 8.28}, {"d": "2029-07-09", "f": 8.21}, {"d": "2030-01-09", "f": 8.14}, {"d": "2030-07-09", "f": 8.07}], "GD35C": [{"d": "2026-07-09", "f": 2.0625}, {"d": "2027-01-11", "f": 2.0625}, {"d": "2027-07-09", "f": 2.0625}, {"d": "2028-01-10", "f": 2.375}, {"d": "2028-07-10", "f": 2.375}, {"d": "2029-01-09", "f": 2.5}, {"d": "2029-07-09", "f": 2.5}, {"d": "2030-01-09", "f": 2.5}, {"d": "2030-07-09", "f": 2.5}, {"d": "2031-01-09", "f": 12.5}, {"d": "2031-07-09", "f": 12.25}, {"d": "2032-01-09", "f": 12.0}, {"d": "2032-07-09", "f": 11.75}, {"d": "2033-01-10", "f": 11.5}, {"d": "2033-07-11", "f": 11.25}, {"d": "2034-01-09", "f": 11.0}, {"d": "2034-07-10", "f": 10.75}, {"d": "2035-01-09", "f": 10.5}, {"d": "2035-07-09", "f": 10.25}], "GD38C": [{"d": "2026-07-09", "f": 2.5}, {"d": "2027-01-11", "f": 2.5}, {"d": "2027-07-09", "f": 7.045454545}, {"d": "2028-01-10", "f": 6.931818182}, {"d": "2028-07-10", "f": 6.818181818}, {"d": "2029-01-09", "f": 6.704545455}, {"d": "2029-07-09", "f": 6.590909091}, {"d": "2030-01-09", "f": 6.477272727}, {"d": "2030-07-09", "f": 6.363636364}, {"d": "2031-01-09", "f": 6.25}, {"d": "2031-07-09", "f": 6.136363636}, {"d": "2032-01-09", "f": 6.022727273}, {"d": "2032-07-09", "f": 5.909090909}, {"d": "2033-01-10", "f": 5.795454545}, {"d": "2033-07-11", "f": 5.681818182}, {"d": "2034-01-09", "f": 5.568181818}, {"d": "2034-07-10", "f": 5.454545455}, {"d": "2035-01-09", "f": 5.340909091}, {"d": "2035-07-09", "f": 5.227272727}, {"d": "2036-01-09", "f": 5.113636364}, {"d": "2036-07-09", "f": 5.0}, {"d": "2037-01-09", "f": 4.886363636}, {"d": "2037-07-09", "f": 4.772727273}, {"d": "2038-01-11", "f": 4.659090909}], "GD41C": [{"d": "2026-07-09", "f": 1.75}, {"d": "2027-01-11", "f": 1.75}, {"d": "2027-07-09", "f": 1.75}, {"d": "2028-01-10", "f": 5.321428571}, {"d": "2028-07-10", "f": 5.258928571}, {"d": "2029-01-09", "f": 5.196428571}, {"d": "2029-07-09", "f": 5.133928571}, {"d": "2030-01-09", "f": 5.660714286}, {"d": "2030-07-09", "f": 5.573660714}, {"d": "2031-01-09", "f": 5.486607143}, {"d": "2031-07-09", "f": 5.399553571}, {"d": "2032-01-09", "f": 5.3125}, {"d": "2032-07-09", "f": 5.225446429}, {"d": "2033-01-10", "f": 5.138392857}, {"d": "2033-07-11", "f": 5.051339286}, {"d": "2034-01-09", "f": 4.964285714}, {"d": "2034-07-10", "f": 4.877232143}, {"d": "2035-01-09", "f": 4.790178571}, {"d": "2035-07-09", "f": 4.703125}, {"d": "2036-01-09", "f": 4.616071429}, {"d": "2036-07-09", "f": 4.529017857}, {"d": "2037-01-09", "f": 4.441964286}, {"d": "2037-07-09", "f": 4.354910714}, {"d": "2038-01-11", "f": 4.267857143}, {"d": "2038-07-09", "f": 4.180803571}, {"d": "2039-01-10", "f": 4.09375}, {"d": "2039-07-11", "f": 4.006696429}, {"d": "2040-01-09", "f": 3.919642857}, {"d": "2040-07-09", "f": 3.832589286}, {"d": "2041-01-09", "f": 3.745535714}, {"d": "2041-07-09", "f": 3.658482143}], "AN29D": [{"d": "2026-05-30", "f": 3.033}, {"d": "2026-11-30", "f": 3.25}, {"d": "2027-05-30", "f": 3.25}, {"d": "2027-11-30", "f": 3.25}, {"d": "2028-05-30", "f": 3.25}, {"d": "2028-11-30", "f": 3.25}, {"d": "2029-05-30", "f": 3.25}, {"d": "2029-11-30", "f": 103.25}], "AO27D": [{"d": "2026-04-30", "f": 0.5}, {"d": "2026-05-29", "f": 0.5}, {"d": "2026-06-30", "f": 0.5}, {"d": "2026-07-31", "f": 0.5}, {"d": "2026-08-31", "f": 0.5}, {"d": "2026-09-30", "f": 0.5}, {"d": "2026-10-30", "f": 0.5}, {"d": "2026-11-30", "f": 0.5}, {"d": "2026-12-30", "f": 0.5}, {"d": "2027-01-29", "f": 0.5}, {"d": "2027-02-26", "f": 0.5}, {"d": "2027-03-31", "f": 0.5}, {"d": "2027-04-30", "f": 0.5}, {"d": "2027-05-31", "f": 0.5}, {"d": "2027-06-30", "f": 0.5}, {"d": "2027-07-30", "f": 0.5}, {"d": "2027-08-31", "f": 0.5}, {"d": "2027-09-30", "f": 0.5}, {"d": "2027-10-29", "f": 100.5}], "AO28D": [{"d": "2026-04-30", "f": 0.5}, {"d": "2026-05-29", "f": 0.5}, {"d": "2026-06-30", "f": 0.5}, {"d": "2026-07-31", "f": 0.5}, {"d": "2026-08-31", "f": 0.5}, {"d": "2026-09-30", "f": 0.5}, {"d": "2026-10-30", "f": 0.5}, {"d": "2026-11-30", "f": 0.5}, {"d": "2026-12-30", "f": 0.5}, {"d": "2027-01-29", "f": 0.5}, {"d": "2027-02-26", "f": 0.5}, {"d": "2027-03-31", "f": 0.5}, {"d": "2027-04-30", "f": 0.5}, {"d": "2027-05-31", "f": 0.5}, {"d": "2027-06-30", "f": 0.5}, {"d": "2027-07-31", "f": 0.5}, {"d": "2027-08-31", "f": 0.5}, {"d": "2027-09-30", "f": 0.5}, {"d": "2027-10-29", "f": 0.5}, {"d": "2027-11-30", "f": 0.5}, {"d": "2027-12-30", "f": 0.5}, {"d": "2028-01-31", "f": 0.5}, {"d": "2028-02-29", "f": 0.5}, {"d": "2028-03-31", "f": 0.5}, {"d": "2028-04-28", "f": 0.5}, {"d": "2028-05-31", "f": 0.5}, {"d": "2028-06-30", "f": 0.5}, {"d": "2028-07-31", "f": 0.5}, {"d": "2028-08-31", "f": 0.5}, {"d": "2028-09-29", "f": 0.5}, {"d": "2028-10-31", "f": 100.5}], "AO29D": [{"d": "2026-08-31", "f": 0.733333333}, {"d": "2026-09-30", "f": 0.5}, {"d": "2026-10-30", "f": 0.5}, {"d": "2026-11-30", "f": 0.5}, {"d": "2026-12-30", "f": 0.5}, {"d": "2027-01-29", "f": 0.483333333}, {"d": "2027-02-26", "f": 0.45}, {"d": "2027-03-31", "f": 0.583333333}, {"d": "2027-04-30", "f": 0.5}, {"d": "2027-05-31", "f": 0.5}, {"d": "2027-06-30", "f": 0.5}, {"d": "2027-07-30", "f": 0.5}, {"d": "2027-08-31", "f": 0.5}, {"d": "2027-09-30", "f": 0.5}, {"d": "2027-10-29", "f": 0.483333333}, {"d": "2027-11-30", "f": 0.516666667}, {"d": "2027-12-30", "f": 0.5}, {"d": "2028-01-31", "f": 0.5}, {"d": "2028-02-29", "f": 0.483333333}, {"d": "2028-03-31", "f": 0.5}, {"d": "2028-04-28", "f": 0.466666667}, {"d": "2028-05-31", "f": 0.55}, {"d": "2028-06-30", "f": 0.5}, {"d": "2028-07-31", "f": 0.5}, {"d": "2028-08-31", "f": 0.5}, {"d": "2028-09-29", "f": 0.483333333}, {"d": "2028-10-31", "f": 0.533333333}, {"d": "2028-11-30", "f": 0.5}, {"d": "2028-12-29", "f": 0.483333333}, {"d": "2029-01-31", "f": 0.533333333}, {"d": "2029-02-28", "f": 0.466666667}, {"d": "2029-03-28", "f": 0.466666667}, {"d": "2029-04-30", "f": 0.533333333}, {"d": "2029-05-31", "f": 0.5}, {"d": "2029-06-29", "f": 0.483333333}, {"d": "2029-07-31", "f": 0.533333333}, {"d": "2029-08-31", "f": 0.5}, {"d": "2029-09-28", "f": 0.466666667}, {"d": "2029-10-31", "f": 100.55}]};       // {TICKER: [{d,f}, ...]}
+
+/* ============================== HELPERS DE FECHA ============================== */
+
+function parseISO(s){ const [y,m,d] = s.split('-').map(Number); return new Date(Date.UTC(y,m-1,d)); }
+function toISO(dt){ return dt.toISOString().slice(0,10); }
+const holidaySet = new Set(FERIADOS);
+function isHoliday(dt){ return holidaySet.has(toISO(dt)); }
+function isWeekend(dt){ const wd = dt.getUTCDay(); return wd===0 || wd===6; }
+function addDays(dt, n){ return new Date(dt.getTime() + n*86400000); }
+
+function workday(dt, n){
+  let d = new Date(dt.getTime());
+  let step = n >= 0 ? 1 : -1;
+  let remaining = Math.abs(n);
+  while(remaining > 0){
+    d = addDays(d, step);
+    if(!isWeekend(d) && !isHoliday(d)) remaining--;
+  }
+  return d;
+}
+
+function networkdays(d1, d2){
+  // Excel NETWORKDAYS: inclusive of both ends, excludes weekends/holidays
+  let a = d1 < d2 ? d1 : d2;
+  let b = d1 < d2 ? d2 : d1;
+  let count = 0;
+  let cur = new Date(a.getTime());
+  while(cur <= b){
+    if(!isWeekend(cur) && !isHoliday(cur)) count++;
+    cur = addDays(cur, 1);
+  }
+  return d1 <= d2 ? count : -count;
+}
+
+function daysBetween(d1, d2){ return Math.round((d1.getTime() - d2.getTime())/86400000); }
+function days360(d1, d2){
+  // US/NASD 30/360, suficiente para MESES DEV de TAMAR
+  let y1=d1.getUTCFullYear(), m1=d1.getUTCMonth()+1, day1=d1.getUTCDate();
+  let y2=d2.getUTCFullYear(), m2=d2.getUTCMonth()+1, day2=d2.getUTCDate();
+  if(day1===31) day1=30;
+  if(day2===31 && day1===30) day2=30;
+  return (y2-y1)*360 + (m2-m1)*30 + (day2-day1);
+}
+
+function parseArgNumber(s){
+  if(s===undefined || s===null) return null;
+  s = String(s).trim();
+  if(s==='') return null;
+  s = s.replace(/\./g,'').replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+function fmt(n, dec){
+  if(n===null || n===undefined || isNaN(n)) return '—';
+  return n.toLocaleString('es-AR', {minimumFractionDigits:dec, maximumFractionDigits:dec});
+}
+function fmtPct(n, dec){
+  if(n===null || n===undefined || isNaN(n)) return '—';
+  return (n*100).toLocaleString('es-AR', {minimumFractionDigits:dec, maximumFractionDigits:dec}) + '%';
+}
+
+/* ============================== ESTADO GLOBAL ============================== */
+
+const state = {
+  priceMap: {},        // symbol -> {precio, bid, ask, volumen, ops}
+  bcraRows: [],         // [{date:Date, cer, tamar, a3500}] ascending
+  fechaLiquidacion: null,
+  a3500Manual: null,
+};
+
+const BCRA_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQTBtkYwoHi5OqWEel-SyYyHHll2K8ybhfbaR4v-WY1-83SPrPdQ6Y_aKdoDvAs-YyQaceoGSEvpLF8/pub?gid=756400279&single=true&output=csv";
+
+async function fetchData912(){
+  const dot = document.getElementById('dotPrices');
+  const ts = document.getElementById('tsPrices');
+  try{
+    const [notesRes, bondsRes] = await Promise.all([
+      fetch('https://data912.com/live/arg_notes', {cache:'no-store'}),
+      fetch('https://data912.com/live/arg_bonds', {cache:'no-store'}),
+    ]);
+    if(!notesRes.ok || !bondsRes.ok) throw new Error('HTTP ' + notesRes.status + '/' + bondsRes.status);
+    const notes = await notesRes.json();
+    const bonds = await bondsRes.json();
+    const map = {};
+    for(const row of [...notes, ...bonds]){
+      const sym = row.symbol;
+      if(!sym) continue;
+      let precio = row.c;
+      if(precio === undefined || precio === null || precio === 0){
+        if(row.px_bid && row.px_ask) precio = (row.px_bid + row.px_ask)/2;
+      }
+      map[sym] = {
+        precio: precio ?? null,
+        bid: row.px_bid ?? null,
+        ask: row.px_ask ?? null,
+        volumen: row.v ?? null,
+        ops: row.q_op ?? null,
+        pct: row.pct_change ?? null,
+      };
+    }
+    state.priceMap = map;
+    dot.className = 'dot ok';
+    ts.textContent = new Date().toLocaleTimeString('es-AR');
+    return true;
+  }catch(err){
+    dot.className = 'dot bad';
+    ts.textContent = 'error: ' + err.message;
+    console.error('data912 fetch failed', err);
+    return false;
+  }
+}
+
+async function fetchBCRA(){
+  const dot = document.getElementById('dotBcra');
+  const ts = document.getElementById('tsBcra');
+  try{
+    const res = await fetch(BCRA_CSV_URL, {cache:'no-store'});
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    const lines = text.trim().split('\n');
+    const rows = [];
+    for(let i=1;i<lines.length;i++){
+      // CSV simple: Fecha,CER,TAMAR,A3500 -- valores entre comillas con coma decimal
+      const cols = lines[i].match(/(".*?"|[^,]*)(,|$)/g).filter(Boolean).map(c => c.replace(/,$/,'').replace(/^"|"$/g,''));
+      const [fechaStr, cerStr, tamarStr, a3500Str] = cols;
+      if(!fechaStr) continue;
+      const [dd,mm,yyyy] = fechaStr.split('/');
+      if(!dd || !mm || !yyyy) continue;
+      const date = new Date(Date.UTC(+yyyy, +mm-1, +dd));
+      rows.push({
+        date,
+        cer: parseArgNumber(cerStr),
+        tamar: parseArgNumber(tamarStr),
+        a3500: parseArgNumber(a3500Str),
+      });
+    }
+    rows.sort((a,b) => a.date - b.date);
+    state.bcraRows = rows;
+    dot.className = 'dot ok';
+    ts.textContent = new Date().toLocaleTimeString('es-AR');
+
+    // precargar input de A3500 con el último valor publicado, si el usuario no tipeó nada todavía
+    const inp = document.getElementById('inpA3500');
+    if(!inp.dataset.touched){
+      for(let i=rows.length-1;i>=0;i--){
+        if(rows[i].a3500 != null){ inp.value = fmt(rows[i].a3500, 2); break; }
+      }
+    }
+    return true;
+  }catch(err){
+    dot.className = 'dot bad';
+    ts.textContent = 'error: ' + err.message;
+    console.error('BCRA CSV fetch failed', err);
+    return false;
+  }
+}
+
+// Búsqueda "closest <= date" sobre bcraRows (equivalente a VLOOKUP aproximado)
+function cerAt(dt){
+  const rows = state.bcraRows;
+  let best = null;
+  for(const r of rows){ if(r.date <= dt && r.cer != null) best = r; else if(r.date > dt) break; }
+  return best ? best.cer : null;
+}
+function tamarValuesInRange(d1, d2){
+  return state.bcraRows.filter(r => r.date >= d1 && r.date <= d2 && r.tamar != null).map(r => r.tamar);
+}
+function last5TamarBefore(d){
+  const rows = state.bcraRows.filter(r => r.date <= d && r.tamar != null);
+  rows.sort((a,b) => b.date - a.date);
+  return rows.slice(0,5).map(r => r.tamar);
+}
+function avg(arr){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null; }
+
+/* ============================== CÁLCULOS POR FAMILIA ==============================
+   Réplica directa de las fórmulas de las hojas TF / CER / TAMAR / DL / SOBERANOS. */
+
+function calcTF(){
+  const liq = state.fechaLiquidacion;
+  const out = [];
+  for(const b of TF){
+    const px = state.priceMap[b.t];
+    const vto = parseISO(b.vto);
+    const dias = daysBetween(vto, liq);
+    if(dias <= 0) continue; // vencido
+    const row = {t:b.t, vto:b.vto, dias};
+    if(!px || !px.precio){ row.err = 'sin precio en data912'; out.push(row); continue; }
+    const precio = px.precio;
+    row.precio = precio;
+    row.volumen = px.volumen;
+    row.duration = dias/365;
+    row.tem = Math.pow(b.pago/precio, 365/12/dias) - 1;
+    row.tna = (b.pago/precio - 1) * 365/dias;
+    row.tea = Math.pow(b.pago/precio, 365/dias) - 1;
+    out.push(row);
+  }
+  return out;
+}
+
+function calcCER(){
+  const liq = state.fechaLiquidacion;
+  const cerActual = cerAt(workday(liq, -10));
+  const out = [];
+  for(const b of CER){
+    const px = state.priceMap[b.t];
+    const vto = parseISO(b.vto);
+    const dias = daysBetween(vto, liq);
+    if(dias <= 0) continue;
+    const row = {t:b.t, vto:b.vto, dias};
+    let cerEmision = b.cerFix;
+    if(cerEmision == null && b.emis){
+      cerEmision = cerAt(workday(parseISO(b.emis), -10));
+    }
+    if(cerEmision == null){ row.err = 'sin CER de emisión (falta histórico BCRA)'; out.push(row); continue; }
+    if(!px || !px.precio){ row.err = 'sin precio en data912'; out.push(row); continue; }
+    if(cerActual == null){ row.err = 'sin CER actual (falta CSV BCRA)'; out.push(row); continue; }
+    const precio = px.precio;
+    const vt = 100 * cerActual / cerEmision;
+    row.precio = precio;
+    row.volumen = px.volumen;
+    row.duration = dias/365;
+    row.tea = Math.pow(vt/precio, 365/dias) - 1;
+    row.tem = Math.pow(1+row.tea, 1/12) - 1;
+    row.tna = (vt/precio - 1) * 365/dias;
+    row.vt = vt;
+    out.push(row);
+  }
+  return out;
+}
+
+function calcTAMAR(){
+  const liq = state.fechaLiquidacion;
+  const out = [];
+  for(const b of TAMAR){
+    const px = state.priceMap[b.t];
+    const emis = parseISO(b.emis);
+    const vto = parseISO(b.vto);
+    const diasReales = daysBetween(vto, liq);
+    if(diasReales <= 0) continue;
+    const row = {t:b.t, vto:b.vto, dias:diasReales};
+    if(!px || !px.precio){ row.err = 'sin precio en data912'; out.push(row); continue; }
+    const precio = px.precio;
+
+    // tramo conocido: desde ~10 hábiles antes de emisión hasta el último dato TAMAR <= liq
+    const L = workday(emis, -10);
+    let M = null;
+    for(let i=state.bcraRows.length-1;i>=0;i--){
+      const r = state.bcraRows[i];
+      if(r.date <= liq && r.tamar != null){ M = r.date; break; }
+    }
+    if(!M){ row.err = 'sin datos TAMAR en el CSV BCRA'; out.push(row); continue; }
+    const conocidos = tamarValuesInRange(L, M);
+    const N = avg(conocidos);
+    const O = networkdays(L, M);
+
+    // tramo proyectado (extrapolación simple: promedio de los últimos 5 TAMAR conocidos)
+    const P = workday(M, 1);
+    const Q = workday(vto, -10);
+    const R = avg(last5TamarBefore(M));
+    const S = networkdays(P, Q);
+
+    if(N == null || R == null || O+S === 0){ row.err = 'datos TAMAR insuficientes para el período'; out.push(row); continue; }
+
+    const promTamar = (O*N + Math.max(S,0)*R) / (O + Math.max(S,0)); // ambos ya en % (ej 23.6)
+    const tasaTotal = promTamar/100 + b.margen/100;
+    const temTamar = Math.pow(1 + tasaTotal/(365/32), 365/32) - 1;
+    // ^ ya es TEM directamente (compuesto a 32 días, llevado a 1 mes con el mismo exponente que usa la planilla)
+    const mesesDev = days360(emis, vto)/360*12;
+    const pagoFinal = Math.trunc(100 * Math.pow(1+temTamar, mesesDev) * 1000) / 1000;
+    const teaMercado = Math.pow(pagoFinal/precio, 365/diasReales) - 1;
+    const temMercado = Math.pow(1+teaMercado, 1/12) - 1;
+    const tnaMercado = temMercado*12;
+    const teaProy = Math.pow(1 + R/100/(365/32), 365/32) - 1;
+    const margenTNA = tnaMercado - R/100;
+    const margenTEA = (1+teaMercado)/(1+teaProy) - 1;
+
+    row.precio = precio;
+    row.volumen = px.volumen;
+    row.duration = diasReales/365;
+    row.tem = temMercado;
+    row.tna = tnaMercado;
+    row.tea = teaMercado;
+    row.margenTNA = margenTNA;
+    row.margenTEA = margenTEA;
+    out.push(row);
+  }
+  return out;
+}
+
+function calcDL(){
+  const liq = state.fechaLiquidacion;
+  const a3500 = parseArgNumber(document.getElementById('inpA3500').value);
+  const out = [];
+  for(const b of DL){
+    const px = state.priceMap[b.t];
+    const vto = parseISO(b.vto);
+    const dias = daysBetween(vto, liq);
+    if(dias <= 0) continue;
+    const row = {t:b.t, vto:b.vto, dias};
+    if(!px || !px.precio){ row.err = 'sin precio en data912'; out.push(row); continue; }
+    if(!a3500){ row.err = 'falta A3500 hoy (campo de arriba)'; out.push(row); continue; }
+    const precio = px.precio;
+    const ratio = 100 / (precio/a3500); // = 100*a3500/precio
+    row.precio = precio;
+    row.volumen = px.volumen;
+    row.duration = dias/365;
+    row.tna = (ratio - 1) * 365/dias;
+    row.tea = Math.pow(ratio, 365/dias) - 1;
+    out.push(row);
+  }
+  return out;
+}
+
+/* ---- Soberanos: XIRR (Newton-Raphson) + Macaulay duration sobre cashflows reales ---- */
+
+function xirrSolve(cashflows, liq, guess){
+  // cashflows: [{date, flujo}], todos posteriores a liq
+  const t = cashflows.map(cf => daysBetween(cf.date, liq)/365);
+  const f = cashflows.map(cf => cf.flujo);
+  let r = guess ?? 0.10;
+  for(let iter=0; iter<80; iter++){
+    let npv = 0, dnpv = 0;
+    for(let i=0;i<f.length;i++){
+      const disc = Math.pow(1+r, t[i]);
+      npv += f[i]/disc;
+      dnpv += -t[i]*f[i]/(disc*(1+r));
+    }
+    if(Math.abs(dnpv) < 1e-12) break;
+    const rNew = r - npv/dnpv;
+    if(!isFinite(rNew)) break;
+    if(Math.abs(rNew - r) < 1e-9){ r = rNew; break; }
+    r = rNew;
+  }
+  return r;
+}
+
+function calcSoberanos(){
+  const liq = state.fechaLiquidacion;
+  const out = [];
+  for(const b of SOBERANOS_META){
+    const px = state.priceMap[b.t];
+    const cfRaw = SOBERANOS_CF[b.t] || [];
+    const row = {t:b.t, tipo:b.tipo};
+    if(!px || !px.precio){ row.err = 'sin precio en data912'; out.push(row); continue; }
+    const precio = px.precio;
+    const cfs = cfRaw
+      .map(c => ({date: parseISO(c.d), flujo: c.f}))
+      .filter(c => c.date > liq)
+      .sort((a,b2) => a.date - b2.date);
+    if(cfs.length === 0){ row.err = 'sin flujos futuros (bono vencido)'; out.push(row); continue; }
+
+    // NPV(r) = -precio + sum(flujo/(1+r)^t) = 0
+    const npvSeries = [{date: liq, flujo: -precio}, ...cfs];
+    const t = npvSeries.map(cf => daysBetween(cf.date, liq)/365);
+    const f = npvSeries.map(cf => cf.flujo);
+    let r = 0.10;
+    for(let iter=0; iter<100; iter++){
+      let npv=0, dnpv=0;
+      for(let i=0;i<f.length;i++){
+        const disc = Math.pow(1+r, t[i]);
+        npv += f[i]/disc;
+        if(t[i] !== 0) dnpv += -t[i]*f[i]/(disc*(1+r));
+      }
+      if(Math.abs(dnpv) < 1e-12) break;
+      const rNew = r - npv/dnpv;
+      if(!isFinite(rNew) || rNew < -0.99) break;
+      if(Math.abs(rNew - r) < 1e-10){ r = rNew; break; }
+      r = rNew;
+    }
+    const tir = r;
+    // Macaulay duration sobre los flujos futuros (sin el -precio)
+    let sumPVt = 0, sumPV = 0;
+    for(const cf of cfs){
+      const ti = daysBetween(cf.date, liq)/365;
+      const pv = cf.flujo / Math.pow(1+tir, ti);
+      sumPVt += pv*ti; sumPV += pv;
+    }
+    const duration = sumPV ? sumPVt/sumPV : null;
+    const mDuration = duration != null ? duration/(1+tir) : null;
+
+    row.precio = precio;
+    row.volumen = px.volumen;
+    row.tir = tir;
+    row.duration = duration;
+    row.mDuration = mDuration;
+    out.push(row);
+  }
+  return out;
+}
+
+/* ============================== RENDER ============================== */
+
+const TABS = [
+  { id:'tf', label:'Tasa Fija', desc:'LECAPs y BONCAPs — instrumentos cero cupón. TEM/TNA/TEA salen directo de precio, pago final y días a vencimiento.',
+    calc: calcTF,
+    cols: [
+      {k:'t', h:'Especie'}, {k:'vto', h:'Vencimiento'},
+      {k:'precio', h:'Precio', dec:2}, {k:'volumen', h:'Volumen', dec:0},
+      {k:'duration', h:'Duration', dec:3},
+      {k:'tem', h:'TEM', pct:true, dec:2}, {k:'tna', h:'TNA', pct:true, dec:2}, {k:'tea', h:'TEA', pct:true, dec:2},
+    ]},
+  { id:'cer', label:'CER', desc:'Bonos ajustados por CER. TEA es rendimiento real (asume CER constante desde hoy hasta el vencimiento, sin proyectar inflación futura).',
+    calc: calcCER,
+    cols: [
+      {k:'t', h:'Especie'}, {k:'vto', h:'Vencimiento'},
+      {k:'precio', h:'Precio', dec:2}, {k:'volumen', h:'Volumen', dec:0},
+      {k:'duration', h:'Duration', dec:3},
+      {k:'tem', h:'TEM real', pct:true, dec:2}, {k:'tna', h:'TNA real', pct:true, dec:2}, {k:'tea', h:'TEA real', pct:true, dec:2},
+    ]},
+  { id:'tamar', label:'TAMAR', desc:'Bonos a tasa variable TAMAR + margen. El tramo de tasa aún no devengado se extrapola con el promedio de los últimos 5 valores de TAMAR publicados (no es proyección REM).',
+    calc: calcTAMAR,
+    cols: [
+      {k:'t', h:'Especie'}, {k:'vto', h:'Vencimiento'},
+      {k:'precio', h:'Precio', dec:2}, {k:'volumen', h:'Volumen', dec:0},
+      {k:'duration', h:'Duration', dec:3},
+      {k:'tem', h:'TEM mercado', pct:true, dec:2}, {k:'tna', h:'TNA mercado', pct:true, dec:2},
+      {k:'tea', h:'TEA mercado', pct:true, dec:2}, {k:'margenTNA', h:'Margen TNA', pct:true, dec:2},
+    ]},
+  { id:'dl', label:'Dollar-Linked', desc:'Cálculo principal (TNA/TEA real en dólares, asumiendo A3500 constante). Sintéticos con futuro ROFEX: pendiente.',
+    calc: calcDL,
+    cols: [
+      {k:'t', h:'Especie'}, {k:'vto', h:'Vencimiento'},
+      {k:'precio', h:'Precio', dec:2}, {k:'volumen', h:'Volumen', dec:0},
+      {k:'duration', h:'Duration', dec:3},
+      {k:'tna', h:'TNA real', pct:true, dec:2}, {k:'tea', h:'TEA real', pct:true, dec:2},
+    ]},
+  { id:'sob', label:'Soberanos USD', desc:'BOPREAL + Bonares (ley local) + Globales (ley NY). TIR (XIRR, Newton-Raphson) y Macaulay Duration sobre cashflows reales de tu Sheet.',
+    calc: calcSoberanos,
+    cols: [
+      {k:'t', h:'Especie'}, {k:'tipo', h:'Tipo'},
+      {k:'precio', h:'Precio', dec:2}, {k:'volumen', h:'Volumen', dec:0},
+      {k:'tir', h:'TIR', pct:true, dec:2}, {k:'duration', h:'Duration', dec:2}, {k:'mDuration', h:'Mod. Duration', dec:2},
+    ]},
+];
+
+const sortState = {}; // tabId -> {col, dir}
+
+function renderTabs(){
+  const tabsRow = document.getElementById('tabsRow');
+  const panels = document.getElementById('panels');
+  tabsRow.innerHTML = '';
+  panels.innerHTML = '';
+  TABS.forEach((tab, i) => {
+    const el = document.createElement('div');
+    el.className = 'tab' + (i===0 ? ' active' : '');
+    el.dataset.tab = tab.id;
+    el.innerHTML = tab.label + ' <span class="cnt" id="cnt-'+tab.id+'"></span>';
+    el.onclick = () => switchTab(tab.id);
+    tabsRow.appendChild(el);
+
+    const panel = document.createElement('div');
+    panel.className = 'panel' + (i===0 ? ' active' : '');
+    panel.id = 'panel-'+tab.id;
+    panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p><div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>';
+    panels.appendChild(panel);
+
+    const headRow = panel.querySelector('#head-'+tab.id);
+    tab.cols.forEach(c => {
+      const th = document.createElement('th');
+      th.textContent = c.h;
+      th.dataset.key = c.k;
+      th.onclick = () => { toggleSort(tab.id, c.k); renderTable(tab); };
+      headRow.appendChild(th);
+    });
+  });
+}
+
+function switchTab(id){
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===id));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id==='panel-'+id));
+}
+
+function toggleSort(tabId, key){
+  const cur = sortState[tabId];
+  if(cur && cur.col===key){ cur.dir *= -1; }
+  else { sortState[tabId] = {col:key, dir:1}; }
+}
+
+function renderTable(tab){
+  const rows = tab.calc();
+  document.getElementById('cnt-'+tab.id).textContent = rows.length;
+  const sort = sortState[tab.id];
+  let sorted = rows.slice();
+  if(sort){
+    sorted.sort((a,b) => {
+      let av=a[sort.col], bv=b[sort.col];
+      if(av==null && bv==null) return 0;
+      if(av==null) return 1; if(bv==null) return -1;
+      if(typeof av === 'string') return av.localeCompare(bv) * sort.dir;
+      return (av-bv) * sort.dir;
+    });
+  }
+  const headRow = document.getElementById('head-'+tab.id);
+  headRow.querySelectorAll('th').forEach(th => th.classList.toggle('sorted', sort && th.dataset.key===sort.col));
+
+  const tbody = document.getElementById('body-'+tab.id);
+  tbody.innerHTML = '';
+  if(sorted.length === 0){
+    tbody.innerHTML = '<tr><td colspan="'+tab.cols.length+'" class="err-row">Sin instrumentos vigentes (todos vencidos según la lista cargada, o falta actualizar el roster).</td></tr>';
+    return;
+  }
+  for(const row of sorted){
+    const tr = document.createElement('tr');
+    if(row.err){
+      tr.innerHTML = '<td>'+row.t+'</td><td colspan="'+(tab.cols.length-1)+'" class="err-row">'+row.err+'</td>';
+      tbody.appendChild(tr);
+      continue;
+    }
+    for(const c of tab.cols){
+      const td = document.createElement('td');
+      let v = row[c.k];
+      if(c.k === 't'){ td.textContent = v; }
+      else if(c.k === 'tipo'){ td.textContent = v; }
+      else if(c.k === 'vto'){ td.textContent = v; td.className='dimval'; }
+      else if(c.pct){
+        td.textContent = fmtPct(v, c.dec);
+        if(v!=null) td.classList.add(v>=0?'pos':'neg');
+      } else {
+        td.textContent = fmt(v, c.dec);
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function renderAll(){
+  TABS.forEach(renderTable);
+}
+
+/* ============================== BOOT / REFRESH ============================== */
+
+function updateFechaLine(){
+  const liq = state.fechaLiquidacion;
+  document.getElementById('fechaLine').textContent =
+    'Análisis: ' + toISO(new Date()) + '  ·  Liquidación T+1: ' + toISO(liq);
+}
+
+async function refreshAll(){
+  state.fechaLiquidacion = workday(new Date(new Date().toDateString()), 1);
+  updateFechaLine();
+  await Promise.all([fetchData912(), fetchBCRA()]);
+  renderAll();
+}
+
+document.getElementById('inpA3500').addEventListener('input', function(){
+  this.dataset.touched = '1';
+  renderTable(TABS.find(t=>t.id==='dl'));
+});
+
+renderTabs();
+refreshAll();
+setInterval(async () => { await fetchData912(); renderAll(); }, 45000);
+setInterval(async () => { await fetchBCRA(); renderAll(); }, 8*60000);
+</script>
+
+</body>
+</html>
