@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prueba de conexión · En Vivo HTML</title>
+<style>
+:root{--bg:#0f1216;--panel:#161b21;--line:#27303a;--text:#e6ebf0;--dim:#8d99a6;--ok:#4fd1a5;--warn:#e8c33d;--bad:#ef6b6b;
+  --mono:'JetBrains Mono','SF Mono',ui-monospace,Consolas,monospace;--sans:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+main{max-width:980px;margin:0 auto;padding:22px 18px 60px;}
+h1{font-size:20px;margin:0 0 4px;font-weight:600;} p.lead{color:var(--dim);margin:0 0 18px;font-size:13.5px;line-height:1.5;}
+.cfg{display:grid;grid-template-columns:1fr 220px;gap:10px;margin-bottom:16px;}
+.cfg label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim);}
+input{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:12.5px;}
+button{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:7px 12px;font-size:12.5px;cursor:pointer;}
+button:hover{border-color:var(--ok);}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:12px;}
+.head{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.head h2{font-size:15px;margin:0;font-weight:600;flex:1;}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--dim);}
+.dot.ok{background:var(--ok);} .dot.bad{background:var(--bad);} .dot.warn{background:var(--warn);}
+.st{font-family:var(--mono);font-size:12px;color:var(--dim);}
+pre{margin:8px 0 0;font-family:var(--mono);font-size:11.5px;color:var(--dim);white-space:pre-wrap;max-height:260px;overflow:auto;}
+table{border-collapse:collapse;font-family:var(--mono);font-size:12px;margin-top:6px;}
+td,th{padding:3px 10px 3px 0;text-align:right;} th{color:var(--dim);font-weight:500;} td:first-child,th:first-child{text-align:left;}
+@media(max-width:700px){.cfg{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Prueba de conexión para el En Vivo en HTML</h1>
+  <p class="lead">Tiene que funcionar subido a tu GitHub Pages (no abierto como archivo local). Verde en las tres = se puede migrar el tablero completo.</p>
+
+  <div class="cfg">
+    <label>URL del Web App de Apps Script (termina en /exec)<input id="url" placeholder="https://script.google.com/macros/s/…/exec"></label>
+    <label>Clave (TOKEN del Code.gs)<input id="tok" placeholder="cambiar-esta-clave"></label>
+  </div>
+  <p><button id="go">Probar todo</button></p>
+
+  <div class="box"><div class="head"><span class="dot" id="d1"></span><h2>1 · data912 directo</h2><span class="st" id="s1">—</span></div>
+    <div id="o1"></div></div>
+  <div class="box"><div class="head"><span class="dot" id="d2"></span><h2>2 · Leer el Sheet (Web App, GET)</h2><span class="st" id="s2">—</span></div>
+    <div id="o2"></div></div>
+  <div class="box"><div class="head"><span class="dot" id="d3"></span><h2>3 · Escribir en el Sheet (Web App, POST)</h2><span class="st" id="s3">—</span></div>
+    <div id="o3"></div></div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const LS = 'envivo_webapp_cfg';
+try{ const c = JSON.parse(localStorage.getItem(LS)) || {}; $('url').value = c.url || ''; $('tok').value = c.tok || ''; }catch(e){}
+const set = (n, cls, txt) => { $('d'+n).className = 'dot ' + cls; $('s'+n).textContent = txt; };
+const fmt = (v, d) => v == null ? '—' : Number(v).toLocaleString('es-AR', {minimumFractionDigits:d, maximumFractionDigits:d});
+
+async function test912(){
+  set(1, 'warn', 'consultando…');
+  const t0 = performance.now();
+  try{
+    const [a, b] = await Promise.all([
+      fetch('https://data912.com/live/arg_bonds', {cache:'no-store'}),
+      fetch('https://data912.com/live/arg_notes', {cache:'no-store'}),
+    ]);
+    if(!a.ok || !b.ok) throw new Error('HTTP ' + a.status + ' / ' + b.status);
+    const rows = [...await a.json(), ...await b.json()];
+    const ms = Math.round(performance.now() - t0);
+    const pick = ['AL30', 'AL30D', 'GD30', 'S30O6', 'T30A7', 'TZXD6', 'TXMJ9'];
+    const by = {}; rows.forEach(r => by[r.symbol] = r);
+    $('o1').innerHTML = '<table><tr><th>Ticker</th><th>Último</th><th>Bid</th><th>Ask</th><th>Nominales</th></tr>' +
+      pick.filter(t => by[t]).map(t => { const r = by[t];
+        return '<tr><td>'+t+'</td><td>'+fmt(r.c,3)+'</td><td>'+fmt(r.px_bid,3)+'</td><td>'+fmt(r.px_ask,3)+'</td><td>'+fmt(r.v,0)+'</td></tr>'; }).join('') + '</table>';
+    set(1, 'ok', rows.length + ' especies · ' + ms + ' ms · ' + new Date().toLocaleTimeString('es-AR'));
+  }catch(err){ set(1, 'bad', 'error: ' + err.message); $('o1').innerHTML = '<pre>'+err+'</pre>'; }
+}
+
+async function testGet(){
+  const url = $('url').value.trim();
+  if(!url){ set(2, 'bad', 'falta la URL del Web App'); return; }
+  set(2, 'warn', 'consultando…');
+  const t0 = performance.now();
+  try{
+    const r = await fetch(url, {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const ms = Math.round(performance.now() - t0);
+    if(!j.ok) throw new Error(JSON.stringify(j));
+    const names = Object.keys(j.sheets);
+    $('o2').innerHTML = '<table><tr><th>Hoja</th><th>Filas</th><th>Primera fila de datos</th></tr>' +
+      names.map(n => { const v = j.sheets[n];
+        return '<tr><td>'+n+'</td><td>'+(v ? v.length - 1 : 'no existe')+'</td><td style="text-align:left;color:var(--dim)">'+(v && v[1] ? JSON.stringify(v[1].slice(0,5)) : '')+'</td></tr>'; }).join('') + '</table>';
+    const kb = Math.round(JSON.stringify(j).length / 1024);
+    set(2, 'ok', names.length + ' hojas · ' + kb + ' KB · ' + ms + ' ms · zona ' + j.tz);
+  }catch(err){
+    set(2, 'bad', 'error: ' + err.message);
+    $('o2').innerHTML = '<pre>Si dice "Failed to fetch": revisá que la implementación sea "Cualquier usuario" y que la URL termine en /exec.\n' + err + '</pre>';
+  }
+}
+
+async function testPost(){
+  const url = $('url').value.trim();
+  if(!url){ set(3, 'bad', 'falta la URL del Web App'); return; }
+  set(3, 'warn', 'enviando…');
+  try{
+    // text/plain evita el "preflight" CORS, que Apps Script no responde
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({action:'ping', echo:'hola'})});
+    const j = await r.json();
+    if(!j.ok || j.echo !== 'hola') throw new Error(JSON.stringify(j));
+    // prueba del token sin escribir nada: acción inexistente con token -> debe responder "acción desconocida"
+    const r2 = await fetch(url, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({action:'nada', token:$('tok').value.trim()})});
+    const j2 = await r2.json();
+    const tokOk = j2.error === 'acción desconocida';
+    $('o3').innerHTML = '<pre>ping: ' + JSON.stringify(j) + '\nclave: ' + (tokOk ? 'correcta' : 'NO coincide con el TOKEN del Code.gs (' + j2.error + ')') + '</pre>';
+    set(3, tokOk ? 'ok' : 'warn', tokOk ? 'POST ok · clave ok' : 'POST ok · revisá la clave');
+  }catch(err){ set(3, 'bad', 'error: ' + err.message); $('o3').innerHTML = '<pre>' + err + '</pre>'; }
+}
+
+$('go').onclick = async () => {
+  try{ localStorage.setItem(LS, JSON.stringify({url:$('url').value.trim(), tok:$('tok').value.trim()})); }catch(e){}
+  await Promise.all([test912(), testGet(), testPost()]);
+};
+test912();
+setInterval(test912, 15000);   // data912 se refresca solo cada 15 s, como lo haría el tablero
+</script>
+</body>
+</html>
