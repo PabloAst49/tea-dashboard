@@ -163,6 +163,21 @@ table.mini td{padding:4px 6px;}
 .cfgbox input{background:var(--bg3);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:12px;border-radius:5px;padding:5px 8px;}
 .cfgbox button{background:var(--bg3);border:1px solid var(--line);color:var(--text);border-radius:5px;padding:6px 14px;cursor:pointer;}
 .cfgbox .note{grid-column:1/-1;}
+.tk{cursor:pointer;border-bottom:1px dotted var(--text-faint);}
+.tk:hover{color:var(--accent);}
+.bo{font-family:var(--mono);font-size:12px;color:var(--text-dim);white-space:nowrap;}
+tr.detrow td{background:var(--bg3);padding:10px 14px;text-align:left;}
+.det .dstats{display:flex;gap:22px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;margin-bottom:6px;}
+.det .dstats span{color:var(--text-dim);}
+.det .dstats b{color:var(--text);font-weight:600;margin-left:4px;}
+.fx3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px;}
+@media(max-width:1000px){.fx3{grid-template-columns:1fr;}}
+.fxc{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:14px 16px 8px;}
+.fxc h3{margin:0 0 6px;font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--text-dim);font-family:var(--mono);font-weight:600;}
+.fxc .bigv{font-family:var(--mono);font-size:22px;font-weight:600;}
+.fxc .sub2{font-family:var(--mono);font-size:11.5px;color:var(--text-dim);display:flex;justify-content:space-between;gap:8px;margin-top:3px;}
+.fxc .sub2 b{color:var(--text);font-weight:500;}
+.pxin{width:118px !important;}
 </style>
 </head>
 <body>
@@ -374,6 +389,8 @@ const state = {
   opsSort: {},    // orden de las tablas de más operadas del Resumen
   prevSync: false,
   minDur: {},     // tabId -> duration mínima en días para curva y ajuste
+  detail: {},     // tabId -> especie con el detalle intradiario abierto
+  ilog: null,     // registro intradiario armado en este navegador {date, fx:[], px:{}}
   showPrev: {},   // tabId -> mostrar la curva de la rueda anterior
 };
 
@@ -544,6 +561,7 @@ function applyPrices(list){
   state.priceMap = pm;
   state.rawPM = pm;
   state.bonosSello = new Date();
+  recordIntraday();
 }
 
 function cerAt(dt){
@@ -710,7 +728,7 @@ function calcTAMAR(){
 
 function calcDL(){
   const liq = state.fechaLiquidacion;
-  const a3500 = state._a3500 != null ? state._a3500 : parseArgNumber(document.getElementById('inpA3500').value);
+  const a3500 = state._a3500 != null ? state._a3500 : parseA3500();
   const out = [];
   for(const b of DL){
     const px = state.priceMap[b.t];
@@ -877,6 +895,8 @@ const TABS = [
 ];
 // Δ contra la rueda anterior: variación de precio y de la tasa de la curva, al lado de la tasa principal
 TABS.forEach(tab => {
+  const ip = tab.cols.findIndex(c => c.k === 'precio');
+  tab.cols.splice(ip+1, 0, {k:'bo', h:'Bid · Offer (mid)', boCell:true});
   const i = tab.cols.findIndex(c => c.k === tab.curveKey);
   tab.cols.splice(i+1, 0, {k:'prevPx', h:'Precio prom. ant.', prev:true, prevCell:'px'}, {k:'prevRate', h:'Tasa prom. ant.', prev:true, prevCell:'rate'});
 });
@@ -903,7 +923,7 @@ function renderTabs(){
     const hasHidden = tab.cols.some(c => c.hidden);
     const toggleBtn = hasHidden ? '<button class="col-toggle" id="coltoggle-'+tab.id+'">Mostrar más columnas</button>' : '';
     const segHtml = isSob(tab.id) ? '<div><span class="seg segMoneda"><button data-m="D" class="on">MEP (D)</button><button data-m="C">CCL (C)</button></span></div>' : '';
-    const pxSeg = '<div class="pxbar">Precio: <span class="seg" id="pxseg-'+tab.id+'"><button data-px="last" class="on">Último</button><button data-px="bid">Bid</button><button data-px="ask">Offer</button></span>'+
+    const pxSeg = '<div class="pxbar">Precio: <span class="seg" id="pxseg-'+tab.id+'"><button data-px="last" class="on">Último</button><button data-px="bid">Bid</button><button data-px="ask">Offer</button><button data-px="mid">Mid</button></span>'+
       ' <a href="#" id="pxreset-'+tab.id+'">restaurar precios editados</a> <span class="small" id="pxinfo-'+tab.id+'"></span></div>';
     panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p>'+segHtml+pxSeg+toggleBtn+'<div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>'+
       '<div class="chart-wrap"><p class="chart-title">'+tab.curveLabel+' vs Duration</p>'+
@@ -941,6 +961,12 @@ function renderTabs(){
     });
 
     const tb = panel.querySelector('#body-'+tab.id);
+    tb.addEventListener('click', (ev) => {
+      const d = ev.target.closest && ev.target.closest('[data-det]'); if(!d) return;
+      const t = d.getAttribute('data-det');
+      state.detail[tab.id] = state.detail[tab.id] === t ? null : t;
+      renderTable(tab);
+    });
     tb.addEventListener('change', (ev) => {
       const el = ev.target;
       const pk = el.getAttribute && el.getAttribute('data-px');
@@ -1058,7 +1084,7 @@ function renderTable(tab){
   }
   const nOv = Object.keys(state.pxOv[tab.id] || {}).length, md = state.pxMode[tab.id] || 'last';
   const pinfo = document.getElementById('pxinfo-'+tab.id);
-  if(pinfo) pinfo.textContent = (md==='last' ? '' : 'calculando con '+(md==='bid'?'BID':'OFFER')+' · ') + (nOv ? nOv+' precio(s) editado(s)' : '');
+  if(pinfo) pinfo.textContent = (md==='last' ? '' : 'calculando con '+({bid:'BID',ask:'OFFER',mid:'MID'}[md])+' · ') + (nOv ? nOv+' precio(s) editado(s)' : '');
   document.getElementById('cnt-'+tab.id).textContent = rows.length;
   const sort = sortState[tab.id];
   let sorted = rows.slice();
@@ -1099,7 +1125,7 @@ function renderTable(tab){
       let v = row[c.k];
       if(c.hidden) td.classList.add('hcol');
       if(c.prev && !state.prev) td.classList.add('noprev');
-      if(c.k === 't'){ td.textContent = v; }
+      if(c.k === 't'){ td.innerHTML = '<span class="tk" data-det="'+row.t+'">'+v+'</span>'; }
       else if(c.k === 'precio'){
         const key = priceKeyFor(tab, row), ov = (state.pxOv[tab.id] || {})[key] != null;
         td.innerHTML = '<input class="pxin'+(ov?' ov':'')+'" data-px="'+key+'" value="'+(v!=null ? fmt(v, v>=1000?2:(v<1?4:3)) : '')+'" title="Editá el precio y apretá Enter · vacío = volver al de mercado">';
@@ -1107,6 +1133,11 @@ function renderTable(tab){
       }
       else if(c.k === 'comp'){ td.innerHTML = compSelectHtml(tab, row); td.classList.add('ctrlcell'); }
       else if(c.k === 'temTF'){ td.innerHTML = temTFHtml(tab, row); td.classList.add('ctrlcell'); }
+      else if(c.boCell){
+        const q = (state.rawPM || {})[priceKeyFor(tab, row)] || {};
+        const mid = (q.bid && q.ask) ? (q.bid+q.ask)/2 : null;
+        td.innerHTML = '<span class="bo">'+fmtP(q.bid)+' / '+fmtP(q.ask)+'</span>'+(mid ? ' <span class="rng">('+fmtP(mid)+')</span>' : '');
+      }
       else if(c.prevCell === 'px'){
         if(v == null){ td.textContent = '—'; }
         else {
@@ -1145,6 +1176,12 @@ function renderTable(tab){
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
+    if(state.detail[tab.id] === row.t && !row.err){
+      const dtr = document.createElement('tr'); dtr.className = 'detrow';
+      dtr.innerHTML = '<td colspan="'+tab.cols.length+'"><div class="det" id="det-'+tab.id+'"></div></td>';
+      tbody.appendChild(dtr);
+      drawDetail(tab, row);
+    }
   }
   renderCurve(tab, rows);
   state.lastRows[tab.id] = rows;
@@ -1371,7 +1408,7 @@ function beValue(tabId, r, precio, tem){
   if(tabId === 'dl'){
     // réplica de DL!Q ("a3500 be") + devaluación mensual desde el A3500 de hoy hasta el fixing (vto -3 hábiles)
     const a3500BE = precio * Math.pow(1+tem, daysBetween(vto, liq)/mesD) / 100;
-    const a3500 = parseArgNumber(document.getElementById('inpA3500').value);
+    const a3500 = parseA3500();
     const d = daysBetween(workday(vto, -3), normDate(new Date()));
     return {v: a3500BE, dev: (a3500 && d > 0) ? Math.pow(a3500BE/a3500, mesD/d) - 1 : null};
   }
@@ -1437,13 +1474,14 @@ function effectivePriceMap(tabId, forceMode){
   const pm = {};
   for(const k in raw){
     const o = raw[k];
-    let p = mode === 'bid' ? o.bid : mode === 'ask' ? o.ask : o.precio;
+    let p = mode === 'bid' ? o.bid : mode === 'ask' ? o.ask : mode === 'mid' ? ((o.bid && o.ask) ? (o.bid+o.ask)/2 : null) : o.precio;
     if(ov[k] != null) p = ov[k];
     pm[k] = Object.assign({}, o, {precio: (p && p > 0) ? p : null});
   }
   for(const k in ov) if(!pm[k]) pm[k] = {precio: ov[k]};
   return pm;
 }
+function parseA3500(){ return parsePriceInput(document.getElementById('inpA3500').value); }
 function parsePriceInput(s){
   s = String(s || '').trim();
   if(!s) return null;
@@ -1540,6 +1578,99 @@ function initPrevLoader(){
   document.getElementById('prevClear').addEventListener('click', async (e) => {
     e.preventDefault(); state.prev = null; state.prevRows = {}; await savePrev(); updatePrevInfo(); renderAll();
   });
+}
+
+/* ============================== INTRADIARIO (se arma en este navegador mientras el tablero está abierto) ============================== */
+const ILOG_KEY = 'envivo_intradia_v1';
+function fmtP(v){ return (v==null || !isFinite(v)) ? '—' : fmt(v, v>=1000?2:(v<1?4:3)); }
+function todayISO(){ const d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function loadIlog(){
+  if(state.ilog && state.ilog.date === todayISO()) return state.ilog;
+  let v = null; try{ v = JSON.parse(localStorage.getItem(ILOG_KEY)); }catch(e){}
+  state.ilog = (v && v.date === todayISO()) ? v : {date: todayISO(), fx: [], px: {}};
+  return state.ilog;
+}
+let _ilogSaved = 0;
+function recordIntraday(){
+  const now = new Date(), hhmm = now.getHours()*100 + now.getMinutes();
+  if(hhmm < 1000 || hhmm > 1800) return;                // solo en horario de rueda
+  const L = loadIlog(), t = now.getTime(), pm = state.rawPM;
+  // FX: cada lectura (≈15 s)
+  const q = fxQuotes('AL30');
+  if(q.mep.last || q.ccl.last) L.fx.push([t, q.mep.last, q.mep.compra, q.mep.venta, q.ccl.last, q.ccl.compra, q.ccl.venta, q.canje.last, q.canje.cclAmep, q.canje.mepAccl]);
+  // especies: un punto por minuto (último, bid, ask)
+  const keys = new Set();
+  [TF, CER, TAMAR, DL].forEach(a => a.forEach(b => keys.add(b.t)));
+  CER_MULTICUPON.forEach(b => keys.add(b.t));
+  BONDS.forEach(b => { keys.add(b.base+'D'); keys.add(b.base+'C'); keys.add(b.base); });
+  const minute = Math.floor(t/60000)*60000;
+  for(const k of keys){
+    const o = pm[k]; if(!o || !(o.precio || o.bid || o.ask)) continue;
+    const arr = L.px[k] || (L.px[k] = []);
+    const pt = [minute, o.precio, o.bid, o.ask];
+    if(arr.length && arr[arr.length-1][0] === minute) arr[arr.length-1] = pt; else arr.push(pt);
+  }
+  if(t - _ilogSaved > 60000){ _ilogSaved = t; try{ localStorage.setItem(ILOG_KEY, JSON.stringify(L)); }catch(e){ console.warn('intradiario: no entra en el almacenamiento del navegador', e); } }
+}
+
+// Gráfico intradiario: línea del último con área, banda sombreada bid–offer, mid punteado y referencia (promedio de la rueda anterior)
+function svgBand(host, pts, o){
+  if(!host) return;
+  const ok = v => v != null && isFinite(v);
+  const P = pts.filter(p => ok(p.y) || (ok(p.lo) && ok(p.hi)));
+  if(P.length < 2){ host.innerHTML = '<p class="sub" style="padding:10px 0">'+(o.empty || 'El gráfico se arma mientras el tablero está abierto (un punto por lectura de data912).')+'</p>'; return; }
+  const W = Math.max(280, host.clientWidth || 600), H = o.h || 190, m = {l:o.ml || 56, r:12, t:10, b:22};
+  const vals = []; P.forEach(p => { [p.y, p.lo, p.hi].forEach(v => ok(v) && vals.push(v)); });
+  if(ok(o.ref)) vals.push(o.ref);
+  let ylo = Math.min(...vals), yhi = Math.max(...vals);
+  const pad = (yhi-ylo)*0.12 || Math.abs(yhi)*0.002 || 1; ylo -= pad; yhi += pad;
+  const xs = P.map(p => +p.x); let xlo = Math.min(...xs), xhi = Math.max(...xs); if(xhi === xlo) xhi = xlo + 60000;
+  const X = t => m.l + (t-xlo)/(xhi-xlo)*(W-m.l-m.r), Y = v => H-m.b - (v-ylo)/(yhi-ylo)*(H-m.t-m.b);
+  const c = o.color || 'var(--accent)', gid = 'g'+Math.random().toString(36).slice(2,8);
+  let s = '<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="display:block"><defs><linearGradient id="'+gid+'" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="'+c+'" stop-opacity=".28"/><stop offset="1" stop-color="'+c+'" stop-opacity=".02"/></linearGradient></defs>';
+  for(let j=0;j<=4;j++){ const v = ylo+(yhi-ylo)*j/4, y = Y(v);
+    s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y+'" y2="'+y+'" stroke="var(--line)" stroke-width=".6"/><text x="'+(m.l-6)+'" y="'+(y+3.5)+'" text-anchor="end" font-size="9.5" fill="var(--text-dim)">'+o.fy(v)+'</text>'; }
+  for(let j=0;j<=4;j++){ const t = xlo+(xhi-xlo)*j/4;
+    s += '<text x="'+X(t)+'" y="'+(H-6)+'" text-anchor="middle" font-size="9.5" fill="var(--text-dim)">'+new Date(t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+'</text>'; }
+  // banda bid–offer (por tramos continuos)
+  let seg = [];
+  const flush = () => { if(seg.length > 1){ s += '<path d="'+seg.map((p,i)=>(i?'L':'M')+X(+p.x).toFixed(1)+','+Y(p.hi).toFixed(1)).join(' ')+' '+seg.slice().reverse().map(p=>'L'+X(+p.x).toFixed(1)+','+Y(p.lo).toFixed(1)).join(' ')+' Z" fill="'+c+'" opacity=".16"/>'; } seg = []; };
+  const GAP = o.gap || 10*60000;
+  P.forEach((p,i) => { if(i && +p.x - +P[i-1].x > GAP) flush(); if(ok(p.lo) && ok(p.hi)) seg.push(p); else flush(); }); flush();
+  // mid
+  const M = P.filter(p => ok(p.lo) && ok(p.hi));
+  if(o.mid !== false && M.length > 1) s += '<path d="'+M.map((p,i)=>((i && +p.x - +M[i-1].x <= GAP)?'L':'M')+X(+p.x).toFixed(1)+','+Y((p.lo+p.hi)/2).toFixed(1)).join(' ')+'" fill="none" stroke="'+c+'" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>';
+  // referencia
+  if(ok(o.ref)){ const y = Y(o.ref); s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y+'" y2="'+y+'" stroke="var(--text-dim)" stroke-dasharray="5 4" stroke-width="1"/><text x="'+(m.l+4)+'" y="'+(y-4)+'" font-size="9.5" fill="var(--text-dim)">'+o.refLabel+' '+o.fy(o.ref)+'</text>'; }
+  // último: área + línea
+  const Ly = P.filter(p => ok(p.y));
+  const runs = []; let run = [];
+  Ly.forEach((p,i) => { if(i && +p.x - +Ly[i-1].x > GAP){ runs.push(run); run = []; } run.push(p); }); runs.push(run);
+  for(const R of runs){
+    if(R.length < 2) continue;
+    const d = R.map((p,i)=>(i?'L':'M')+X(+p.x).toFixed(1)+','+Y(p.y).toFixed(1)).join(' ');
+    s += '<path d="'+d+' L'+X(+R[R.length-1].x).toFixed(1)+','+(H-m.b)+' L'+X(+R[0].x).toFixed(1)+','+(H-m.b)+' Z" fill="url(#'+gid+')"/>';
+    s += '<path d="'+d+'" fill="none" stroke="'+c+'" stroke-width="1.8" stroke-linejoin="round"/>';
+  }
+  if(Ly.length){ const lp = Ly[Ly.length-1]; s += '<circle cx="'+X(+lp.x)+'" cy="'+Y(lp.y)+'" r="3" fill="'+c+'"/>'; }
+  host.innerHTML = s + '</svg>';
+}
+
+function drawDetail(tab, row){
+  const host = document.getElementById('det-'+tab.id); if(!host) return;
+  const key = priceKeyFor(tab, row), q = (state.rawPM || {})[key] || {};
+  const mid = (q.bid && q.ask) ? (q.bid+q.ask)/2 : null;
+  const pv = state.prev && state.prev.px[key] ? state.prev.px[key].p : null;
+  const dd = state.prev ? state.prev.date.split('-').reverse().slice(0,2).join('/') : '';
+  const sp = (q.bid && q.ask) ? (q.ask/q.bid - 1)*100 : null;
+  host.innerHTML = '<div class="dstats"><span>'+key+'</span>'+
+    '<span>Previo (VWAP '+(dd||'—')+')<b>'+fmtP(pv)+'</b></span><span>Último<b>'+fmtP(q.precio)+'</b></span>'+
+    '<span>Bid<b>'+fmtP(q.bid)+'</b></span><span>Offer<b>'+fmtP(q.ask)+'</b></span><span>Mid<b>'+fmtP(mid)+'</b></span>'+
+    '<span>Spread<b>'+(sp==null?'—':fmt(sp,2)+'%')+'</b></span><span>Δ vs previo<b class="'+(pv&&q.precio?(q.precio>=pv?'pos':'neg'):'')+'">'+(pv&&q.precio?((q.precio/pv-1)*100>=0?'+':'')+fmt((q.precio/pv-1)*100,2)+'%':'—')+'</b></span></div>'+
+    '<div id="detc-'+tab.id+'"></div><div class="note" style="font-size:11px;color:var(--text-faint)">Línea = último · banda = bid–offer · punteado = mid · guiones = promedio de la rueda anterior. Se arma con un punto por minuto mientras el tablero está abierto (horario de rueda). Click en la especie para cerrar.</div>';
+  const L = loadIlog(), arr = (L.px[key] || []);
+  svgBand(document.getElementById('detc-'+tab.id), arr.map(a => ({x:a[0], y:a[1], lo:a[2], hi:a[3]})),
+    {h:200, fy: v => fmtP(v), ref: pv, refLabel:'prom. '+dd, color: isSob(tab.id) ? GRUPO_COLOR[row.grupo] : 'var(--accent)'});
 }
 
 function logFit(pts){
@@ -1745,11 +1876,8 @@ function addFxTab(){
   const panel = document.createElement('div');
   panel.className = 'panel'; panel.id = 'panel-fx';
   panel.innerHTML = '<p class="panel-desc">Dólares financieros en vivo, igual que la hoja MEP_CCL: MEP = AL30 / AL30D, CCL = AL30 / AL30C, Canje = AL30D / AL30C − 1 (último operado). '+
-    'Compra = lo que pagás el dólar (AL30 al ask, D/C al bid); Venta = lo que te pagan (AL30 al bid, D/C al ask). Profundidad en USD con las cantidades en punta. Los gráficos salen del registro minuto a minuto de la hoja MEP_CCL (última rueda).</p>'+
-    '<div class="cards" id="fxCards"></div>'+
-    '<div class="fxchart"><p class="chart-title">Intradiario · MEP (AL30 / AL30D)</p><div id="fxChartMep"></div></div>'+
-    '<div class="fxchart"><p class="chart-title">Intradiario · CCL (AL30 / AL30C)</p><div id="fxChartCcl"></div></div>'+
-    '<div class="fxchart"><p class="chart-title">Intradiario · Canje (AL30D / AL30C − 1)</p><div id="fxChartCanje"></div></div>'+
+    'Compra = lo que pagás el dólar (AL30 al ask, D/C al bid); Venta = lo que te pagan (AL30 al bid, D/C al ask). Profundidad en USD con las cantidades en punta. Gráficos: línea = último, banda = compra–venta, punteado = mid, guiones = promedio de la rueda anterior. Se arman con cada lectura de data912 mientras el tablero está abierto; antes de eso se completa con el registro de la hoja MEP_CCL (solo último).</p>'+
+    '<div class="fx3" id="fxCards"></div>'+
     '<div class="table-wrap"><table><thead><tr><th>Bono</th><th>MEP último</th><th>MEP compra</th><th>MEP venta</th><th>CCL último</th><th>CCL compra</th><th>CCL venta</th><th>Canje</th><th>Canje MEP→CCL</th><th>Canje CCL→MEP</th></tr></thead><tbody id="fxTable"></tbody></table></div>';
   document.getElementById('panels').appendChild(panel);
 }
@@ -1796,20 +1924,27 @@ function renderFx(){
   const vs = (v, v0) => !state.prev ? ' <span class="small">(cargá la rueda anterior para comparar)</span>' :
     (v != null && v0) ? ' <span class="dlt '+(v>v0?'up':v<v0?'dn':'')+'">('+(v>=v0?'+':'')+fmt((v/v0-1)*100,2)+'% vs prom. '+dd+')</span>' : '';
   const promRow = v0 => state.prev ? [['Promedio '+dd, fmt(v0,2)]] : [];
-  const card = (tit, big, rows, note) => '<div class="card"><h3>'+tit+'</h3><div class="big">'+big+'</div>'+rows.map(r => '<div class="row"><span>'+r[0]+'</span><span>'+r[1]+'</span></div>').join('')+(note?'<div class="note">'+note+'</div>':'')+'</div>';
+  const L = loadIlog();
+  const t0 = L.fx.length ? L.fx[0][0] : Infinity;
+  const sheetPts = (state.fxLog || []).filter(x => x.ts.getTime() < t0 && x.ts.toDateString() === new Date().toDateString());
+  const ser = (iL, iC, iV, sheetKey, scale) => sheetPts.map(x => ({x:x.ts.getTime(), y: x[sheetKey] != null ? x[sheetKey]*scale : null}))
+      .concat(L.fx.map(a => ({x:a[0], y: a[iL]!=null ? a[iL]*scale : null, lo: a[iV]!=null ? a[iV]*scale : null, hi: a[iC]!=null ? a[iC]*scale : null})));
+  const dlt = (v, v0, pct) => (v==null || v0==null || !state.prev) ? '' :
+      (pct ? ' <span class="dlt '+(v>v0?'up':v<v0?'dn':'')+'">'+(v>=v0?'+':'')+fmt((v-v0)*100,2)+'%</span>'
+           : ' <span class="dlt '+(v>v0?'up':v<v0?'dn':'')+'">'+(v>=v0?'+':'')+fmt((v/v0-1)*100,2)+'%</span>');
+  const fxCard = (id, tit, big, d, rows) => '<div class="fxc"><h3>'+tit+'</h3><div class="bigv">'+big+d+'</div>'+
+      rows.map(r => '<div class="sub2"><span>'+r[0]+'</span><b>'+r[1]+'</b></div>').join('')+'<div id="'+id+'" style="margin-top:8px"></div></div>';
+  const promTxt = v => state.prev ? fmt(v,2) : 'cargá la rueda anterior';
   cards.innerHTML =
-    card('MEP · AL30', fmt(q.mep.last,2)+vs(q.mep.last, prevMep), [...promRow(prevMep), ['Compra', fmt(q.mep.compra,2)+' · '+fmtUsdK(q.mep.profC)+' USD'], ['Venta', fmt(q.mep.venta,2)+' · '+fmtUsdK(q.mep.profV)+' USD']]) +
-    card('CCL · AL30', fmt(q.ccl.last,2)+vs(q.ccl.last, prevCcl), [...promRow(prevCcl), ['Compra', fmt(q.ccl.compra,2)+' · '+fmtUsdK(q.ccl.profC)+' USD'], ['Venta', fmt(q.ccl.venta,2)+' · '+fmtUsdK(q.ccl.profV)+' USD']]) +
-    card('Canje', fmtPct(q.canje.last,2)+(!state.prev ? '' : (q.canje.last != null && prevCanje != null) ? ' <span class="dlt">('+(q.canje.last>=prevCanje?'+':'')+fmt((q.canje.last-prevCanje)*100,2)+'% vs prom. '+dd+')</span>' : ''), [...(state.prev ? [['Promedio '+dd, fmtPct(prevCanje,2)]] : []), ['MEP → CCL', fmtPct(q.canje.mepAccl,2)], ['CCL → MEP', fmtPct(q.canje.cclAmep,2)]]);
-  svgLines(document.getElementById('fxChartMep'), [
-    {pts: log.map(x => ({x:x.ts, y:x.mep})), color:'#60a5fa', label:'MEP'},
-  ], {h:200, fy: v => fmt(v,1)});
-  svgLines(document.getElementById('fxChartCcl'), [
-    {pts: log.map(x => ({x:x.ts, y:x.ccl})), color:'#fb923c', label:'CCL'},
-  ], {h:200, fy: v => fmt(v,1)});
-  svgLines(document.getElementById('fxChartCanje'), [
-    {pts: log.map(x => ({x:x.ts, y:x.canje != null ? x.canje*100 : null})), color:'#4fd1a5', label:'Canje'},
-  ], {h:180, fy: v => fmt(v,2)+'%'});
+    fxCard('fxChartMep', 'MEP AL30 · intradiario', '$ '+fmt(q.mep.last,2), dlt(q.mep.last, prevMep),
+      [['Prom. '+(dd||'rueda ant.'), promTxt(prevMep)], ['Compra / Venta', fmt(q.mep.compra,2)+' / '+fmt(q.mep.venta,2)], ['Prof. compra / venta', fmtUsdK(q.mep.profC)+' / '+fmtUsdK(q.mep.profV)+' USD']]) +
+    fxCard('fxChartCcl', 'Cable (CCL) AL30 · intradiario', '$ '+fmt(q.ccl.last,2), dlt(q.ccl.last, prevCcl),
+      [['Prom. '+(dd||'rueda ant.'), promTxt(prevCcl)], ['Compra / Venta', fmt(q.ccl.compra,2)+' / '+fmt(q.ccl.venta,2)], ['Prof. compra / venta', fmtUsdK(q.ccl.profC)+' / '+fmtUsdK(q.ccl.profV)+' USD']]) +
+    fxCard('fxChartCanje', 'Canje MEP → Cable · intradiario', fmtPct(q.canje.last,2), dlt(q.canje.last, prevCanje, true),
+      [['Prom. '+(dd||'rueda ant.'), state.prev ? fmtPct(prevCanje,2) : 'cargá la rueda anterior'], ['CCL→MEP / MEP→CCL', fmtPct(q.canje.cclAmep,2)+' / '+fmtPct(q.canje.mepAccl,2)], ['', '']]);
+  svgBand(document.getElementById('fxChartMep'), ser(1,2,3,'mep',1), {color:'#e8a33d', fy:v=>fmt(v,1), ref:prevMep, refLabel:'prom. '+dd, h:190});
+  svgBand(document.getElementById('fxChartCcl'), ser(4,5,6,'ccl',1), {color:'#60a5fa', fy:v=>fmt(v,1), ref:prevCcl, refLabel:'prom. '+dd, h:190});
+  svgBand(document.getElementById('fxChartCanje'), ser(7,8,9,'canje',100), {color:'#4fd1a5', fy:v=>fmt(v,2)+'%', ref: prevCanje!=null ? prevCanje*100 : null, refLabel:'prom. '+dd, h:190});
   document.getElementById('fxTable').innerHTML = FX_BONDS.map(b => { const x = fxQuotes(b);
     return '<tr><td>'+b+'</td><td>'+fmt(x.mep.last,2)+'</td><td>'+fmt(x.mep.compra,2)+'</td><td>'+fmt(x.mep.venta,2)+'</td>'+
       '<td>'+fmt(x.ccl.last,2)+'</td><td>'+fmt(x.ccl.compra,2)+'</td><td>'+fmt(x.ccl.venta,2)+'</td>'+
@@ -1862,7 +1997,7 @@ function renderResumen(){
   let html = '<div class="cards">';
 
   // FX
-  const q = fxQuotes('AL30'), a3500 = parseArgNumber(document.getElementById('inpA3500').value);
+  const q = fxQuotes('AL30'), a3500 = parseA3500();
   html += card('Dólar (AL30)', [['MEP', fmt(q.mep.last,2)], ['CCL', fmt(q.ccl.last,2)], ['Canje', pc(q.canje.last)]], 'Precios data912: '+sello);
 
   // Tasa fija
