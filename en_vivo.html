@@ -918,7 +918,7 @@ TABS.forEach(tab => {
   const ip = tab.cols.findIndex(c => c.k === 'precio');
   tab.cols.splice(ip+1, 0, {k:'hoy', h:'Hoy', hoyCell:true}, {k:'bo', h:'Bid · Offer (mid)', boCell:true});
   const iv = tab.cols.findIndex(c => c.k === 'volumen');
-  tab.cols.splice(iv+1, 0, {k:'flow', h:'Últ. 60 min · flujo 15 min', flowCell:true});
+  tab.cols.splice(iv+1, 0, {k:'flow', h:'Volumen última hora · últ. 15 min', flowCell:true});
   const i = tab.cols.findIndex(c => c.k === tab.curveKey);
   tab.cols.splice(i+1, 0, {k:'prevPx', h:'Precio prom. ant.', prev:true, prevCell:'px'}, {k:'prevRate', h:'Tasa prom. ant.', prev:true, prevCell:'rate'});
 });
@@ -1211,21 +1211,9 @@ function renderTable(tab){
         const f = row._flow;
         if(!f){ td.innerHTML = '<span class="rng">—</span>'; }
         else {
-          const key = priceKeyFor(tab, row), enTasa = state.iunit[tab.id] !== 'px';
-          let sp = f.spark, dTxt = '', cls = '';
-          if(enTasa){
-            const r0 = rateAt(tab, row.t, key, f.p0), r1 = rateAt(tab, row.t, key, f.p1);
-            const db = (r0 != null && r1 != null) ? (Math.round((r1 - r0)*1e4) || 0) : null;
-            dTxt = db == null ? '' : (db>0?'+':'')+fmt(db,0)+' pb'; cls = db>0 ? 'dn' : db<0 ? 'up' : '';
-            if(sp) sp = toRatePts(tab, row.t, key, sp);
-          } else {
-            dTxt = f.dpx==null ? '' : (f.dpx>0?'+':'')+fmt(f.dpx*100,2)+'%'; cls = f.dpx>0 ? 'up' : f.dpx<0 ? 'dn' : '';
-          }
-          const col = cls === 'up' ? 'var(--accent)' : cls === 'dn' ? 'var(--bad)' : 'var(--text-dim)';
-          td.innerHTML = '<div class="flowc'+(f.hot?' hot':'')+'">'+(sp ? sparkSvg(sp, col) : '')+
-            '<span class="fv">'+(f.flow>0 ? (isSob(tab.id) ? fmtUsdK(f.flow) : fmtVolumen(f.flow)) : '0')+'</span>'+
-            '<span class="dlt '+cls+'">'+dTxt+'</span></div>';
-          td.title = 'Últimos 15 min: '+(isSob(tab.id)?fmtUsdK(f.flow)+' USD':fmtVolumen(f.flow))+' operados ('+fmt(f.share*100,0)+'% de lo del día), precio '+(f.dpx==null?'—':(f.dpx>0?'+':'')+fmt(f.dpx*100,2)+'%');
+          td.innerHTML = '<div class="flowc'+(f.hot?' hot':'')+'">'+volBarsSvg(f.bars || [], f.tNow)+
+            '<span class="fv">'+(f.flow>0 ? (isSob(tab.id) ? fmtUsdK(f.flow) : fmtVolumen(f.flow)) : '0')+'</span></div>';
+          td.title = 'Volumen por minuto de la última hora (amarillo = últimos 15 min). Últimos 15 min: '+(isSob(tab.id)?fmtUsdK(f.flow)+' USD':fmtVolumen(f.flow))+' ('+fmt(f.share*100,0)+'% de lo del día)';
         }
       }
       else if(c.boCell){
@@ -1745,8 +1733,8 @@ function recordIntraday(){
 const FLOW_MIN = {ARS: 50e6, USD: 20e3};      // debajo de esto no se muestra la actividad (se opera casi nada)
 const HOT_MIN  = {ARS: 300e6, USD: 150e3};    // flujo mínimo en 15 min para marcar alerta
 function flowInfo(key, usd, volDia){
-  const L = loadIlog(), arr = L.px[key];
-  if(!arr || arr.length < 2) return null;
+  const arr = ilogPx(key);
+  if(arr.length < 2) return null;
   const unit = usd ? 'USD' : 'ARS';
   if(!(volDia >= FLOW_MIN[unit])) return null;
   const last = arr[arr.length-1], tNow = last[0];
@@ -1757,12 +1745,23 @@ function flowInfo(key, usd, volDia){
   const flow = (dn != null && px) ? dn * px / 100 : 0;
   const dpx = (last[1] && base[1]) ? last[1]/base[1] - 1 : null;
   const spark = arr.filter(a => a[0] >= tNow - 60*60000);
+  // monto operado en cada minuto de la última hora: Δ nominales × precio / 100
+  const bars = [];
+  for(let i=1;i<arr.length;i++){
+    const a = arr[i], b = arr[i-1];
+    if(a[0] < tNow - 60*60000) continue;
+    const dn = (a[4] != null && b[4] != null) ? Math.max(0, a[4] - b[4]) : 0;
+    bars.push([a[0], dn * (a[1] || b[1] || 0) / 100]);
+  }
   const share = volDia ? flow/volDia : 0;
-  return {flow, dpx, p0: base[1], p1: last[1], spark: spark.length > 1 ? spark : null, share, hot: flow >= HOT_MIN[unit] && share >= 0.10};
+  return {flow, dpx, p0: base[1], p1: last[1], spark: spark.length > 1 ? spark : null, bars, tNow, share, hot: flow >= HOT_MIN[unit] && share >= 0.10};
 }
 // recorrido del día de cada especie (último), en tasa o precio según el switch de la pestaña
+function ilogPx(key){
+  return (loadIlog().px[key] || []).filter(a => { const d = new Date(a[0]), hm = d.getHours()*100 + d.getMinutes(); return hm >= 1040 && hm <= 1705; });
+}
 function hoyInfo(tab, row){
-  const key = priceKeyFor(tab, row), arr = (loadIlog().px[key] || []).filter(a => a[1]);
+  const key = priceKeyFor(tab, row), arr = ilogPx(key).filter(a => a[1]);
   if(arr.length < 2) return null;
   const tasa = state.iunit[tab.id] !== 'px';
   const pts = tasa ? toRatePts(tab, row.t, key, arr).filter(a => a[1] != null) : arr;
@@ -1770,6 +1769,20 @@ function hoyInfo(tab, row){
   const line = pts.map(a => [a[0], a[1], null, null]);   // solo la línea del último, sin banda
   const v0 = pts[0][1], v1 = pts[pts.length-1][1];
   return {pts: line, v0, v1, tasa, d: tasa ? (v1 - v0)*100 : v1/v0 - 1};   // tasa: en pb (valores en %)
+}
+// barras de volumen por minuto (última hora); los últimos 15 min resaltados
+function volBarsSvg(bars, tNow){
+  const W = 96, H = 24, n = 60, bw = W/n;
+  const mx = Math.max(0, ...bars.map(b => b[1]));
+  let s = '<svg class="spk" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'"><line x1="0" x2="'+W+'" y1="'+(H-0.5)+'" y2="'+(H-0.5)+'" stroke="var(--line)"/>';
+  if(mx > 0) for(const [t, v] of bars){
+    if(!(v > 0)) continue;
+    const i = n - 1 - Math.round((tNow - t)/60000); if(i < 0) continue;
+    const hh = Math.max(1.5, v/mx*(H-2));
+    const reciente = tNow - t < 15*60000;
+    s += '<rect x="'+(i*bw).toFixed(1)+'" y="'+(H-hh).toFixed(1)+'" width="'+Math.max(1, bw-0.4).toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+(reciente ? 'var(--warn)' : 'var(--text-faint)')+'"/>';
+  }
+  return s + '</svg>';
 }
 function sparkSvg(arr, col){
   const W = 88, H = 24, ok = v => v != null && isFinite(v);
@@ -1880,7 +1893,7 @@ function drawDetail(tab, row){
     '<span>Bid<b>'+fmtP(q.bid)+'</b></span><span>Offer<b>'+fmtP(q.ask)+'</b></span><span>Mid<b>'+fmtP(mid)+'</b></span>'+
     '<span>Spread<b>'+(sp==null?'—':fmt(sp,2)+'%')+'</b></span><span>Δ vs previo<b class="'+(pv&&q.precio?(q.precio>=pv?'pos':'neg'):'')+'">'+(pv&&q.precio?((q.precio/pv-1)*100>=0?'+':'')+fmt((q.precio/pv-1)*100,2)+'%':'—')+'</b></span></div>'+
     '<div id="detc-'+tab.id+'"></div><div class="note" style="font-size:11px;color:var(--text-faint)">Línea = último · banda = bid–offer · punteado = mid · guiones = promedio de la rueda anterior. Tasa o precio según el switch "Intradiario en". Se arma con un punto por minuto mientras el tablero está abierto (horario de rueda). Click en la especie para cerrar.</div>';
-  const L = loadIlog(), arr = (L.px[key] || []);
+  const arr = ilogPx(key);
   const color = isSob(tab.id) ? GRUPO_COLOR[row.grupo] : 'var(--accent)';
   if(state.iunit[tab.id] !== 'px'){
     const R = toRatePts(tab, row.t, key, arr);   // [t, último, tasa al ask (baja), tasa al bid (alta)]
@@ -2383,13 +2396,13 @@ function addImplTab(){
 // serie intradiaria de la implícita: último del indexado y de la TF comparable, minuto a minuto
 function implSeries(fam, r){
   const cfg = r._cfg || {};
-  const L = loadIlog(), A = L.px[r.t];
-  if(!A || A.length < 2) return null;
+  const A = ilogPx(r.t);
+  if(A.length < 2) return null;
   const mesD = 365/12;
   let temAt = null;
   if((cfg.mode === 'auto' || cfg.mode === 'tk') && cfg.tk){
-    const B = L.px[cfg.tk], tfb = TF.find(x => x.t === cfg.tk);
-    if(!B || !tfb) return null;
+    const B = ilogPx(cfg.tk), tfb = TF.find(x => x.t === cfg.tk);
+    if(!B.length || !tfb) return null;
     const dias = daysBetween(parseISO(tfb.vto), state.fechaLiquidacion);
     const mp = new Map(B.map(b => [b[0], b[1]]));
     temAt = t => { const p = mp.get(t); return (p && dias > 0) ? Math.pow(tfb.pago/p, mesD/dias) - 1 : null; };
@@ -2489,7 +2502,7 @@ function renderRel(S, Lg){
   const spHi = dif(r(Lg.t,kL,qL.bid), r(S.t,kS,qS.ask));      // compro la corta (ask) y vendo la larga (bid)
   const rtNow = (qS.precio && qL.precio) ? qS.precio/qL.precio : null;
   const rtLo = (qS.bid && qL.ask) ? qS.bid/qL.ask : null, rtHi = (qS.ask && qL.bid) ? qS.ask/qL.bid : null;
-  const IL = loadIlog(), A = IL.px[kS] || [], B = new Map((IL.px[kL] || []).map(b => [b[0], b]));
+  const A = ilogPx(kS), B = new Map(ilogPx(kL).map(b => [b[0], b]));
   const spPts = [], rtPts = [];
   for(const a of A){
     const b = B.get(a[0]); if(!b) continue;
