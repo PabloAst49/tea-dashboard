@@ -916,7 +916,7 @@ const TABS = [
 // Δ contra la rueda anterior: variación de precio y de la tasa de la curva, al lado de la tasa principal
 TABS.forEach(tab => {
   const ip = tab.cols.findIndex(c => c.k === 'precio');
-  tab.cols.splice(ip+1, 0, {k:'bo', h:'Bid · Offer (mid)', boCell:true});
+  tab.cols.splice(ip+1, 0, {k:'hoy', h:'Hoy', hoyCell:true}, {k:'bo', h:'Bid · Offer (mid)', boCell:true});
   const iv = tab.cols.findIndex(c => c.k === 'volumen');
   tab.cols.splice(iv+1, 0, {k:'flow', h:'Últ. 60 min · flujo 15 min', flowCell:true});
   const i = tab.cols.findIndex(c => c.k === tab.curveKey);
@@ -1143,7 +1143,7 @@ function renderTable(tab){
     }
   }
   // actividad reciente: flujo de los últimos 15 min y sparkline de 60 min (registro del navegador)
-  for(const r of rows){ if(r.err) continue; r._flow = flowInfo(priceKeyFor(tab, r), isSob(tab.id), r.volumen); r.flow = r._flow ? r._flow.flow : null; }
+  for(const r of rows){ if(r.err) continue; r._flow = flowInfo(priceKeyFor(tab, r), isSob(tab.id), r.volumen); r.flow = r._flow ? r._flow.flow : null; r._hoy = hoyInfo(tab, r); r.hoy = r._hoy ? r._hoy.d : null; }
   renderAlerts(tab, rows);
   const nOv = Object.keys(state.pxOv[tab.id] || {}).length, md = state.pxMode[tab.id] || 'last';
   const pinfo = document.getElementById('pxinfo-'+tab.id);
@@ -1196,6 +1196,17 @@ function renderTable(tab){
       }
       else if(c.k === 'comp'){ td.innerHTML = compSelectHtml(tab, row); td.classList.add('ctrlcell'); }
       else if(c.k === 'temTF'){ td.innerHTML = temTFHtml(tab, row); td.classList.add('ctrlcell'); }
+      else if(c.hoyCell){
+        const x = row._hoy;
+        if(!x){ td.innerHTML = '<span class="rng">—</span>'; }
+        else {
+          const cls = x.d > 0 ? (x.tasa ? 'dn' : 'up') : x.d < 0 ? (x.tasa ? 'up' : 'dn') : '';
+          const col = cls === 'up' ? 'var(--accent)' : cls === 'dn' ? 'var(--bad)' : 'var(--text-dim)';
+          td.innerHTML = '<div class="flowc">'+sparkSvg(x.pts, col)+'<span class="dlt '+cls+'" style="min-width:52px;text-align:right">'+
+            (x.tasa ? ((Math.round(x.d)||0)>0?'+':'')+fmt(Math.round(x.d)||0,0)+' pb' : (x.d>0?'+':'')+fmt(x.d*100,2)+'%')+'</span></div>';
+          td.title = 'En el día (desde las 10:40): '+(x.tasa ? 'tasa' : 'precio')+' '+(x.tasa ? fmt(x.v0,3)+'% → '+fmt(x.v1,3)+'%' : fmtP(x.v0)+' → '+fmtP(x.v1));
+        }
+      }
       else if(c.flowCell){
         const f = row._flow;
         if(!f){ td.innerHTML = '<span class="rng">—</span>'; }
@@ -1709,7 +1720,7 @@ function loadIlog(){
 let _ilogSaved = 0;
 function recordIntraday(){
   const now = new Date(), hhmm = now.getHours()*100 + now.getMinutes();
-  if(hhmm < 1000 || hhmm > 1800) return;                // solo en horario de rueda
+  if(hhmm < 1040 || hhmm > 1705) return;                // desde las 10:40: 10 min para que se acomoden las puntas
   const L = loadIlog(), t = now.getTime(), pm = state.rawPM;
   // FX: cada lectura (≈15 s)
   const q = fxQuotes('AL30');
@@ -1749,6 +1760,17 @@ function flowInfo(key, usd, volDia){
   const share = volDia ? flow/volDia : 0;
   return {flow, dpx, p0: base[1], p1: last[1], spark: spark.length > 1 ? spark : null, share, hot: flow >= HOT_MIN[unit] && share >= 0.10};
 }
+// recorrido del día de cada especie (último), en tasa o precio según el switch de la pestaña
+function hoyInfo(tab, row){
+  const key = priceKeyFor(tab, row), arr = (loadIlog().px[key] || []).filter(a => a[1]);
+  if(arr.length < 2) return null;
+  const tasa = state.iunit[tab.id] !== 'px';
+  const pts = tasa ? toRatePts(tab, row.t, key, arr).filter(a => a[1] != null) : arr;
+  if(pts.length < 2) return null;
+  const line = pts.map(a => [a[0], a[1], null, null]);   // solo la línea del último, sin banda
+  const v0 = pts[0][1], v1 = pts[pts.length-1][1];
+  return {pts: line, v0, v1, tasa, d: tasa ? (v1 - v0)*100 : v1/v0 - 1};   // tasa: en pb (valores en %)
+}
 function sparkSvg(arr, col){
   const W = 88, H = 24, ok = v => v != null && isFinite(v);
   const vals = []; arr.forEach(a => [a[1],a[2],a[3]].forEach(v => ok(v) && vals.push(v)));
@@ -1778,30 +1800,39 @@ function svgBand(host, pts, o){
   const P = pts.filter(p => ok(p.y) || (ok(p.lo) && ok(p.hi)));
   if(P.length < 2){ host.innerHTML = '<p class="sub" style="padding:10px 0">'+(o.empty || 'El gráfico se arma mientras el tablero está abierto (un punto por lectura de data912).')+'</p>'; return; }
   const W = Math.max(280, host.clientWidth || 600), H = o.h || 190, m = {l:o.ml || 56, r:12, t:10, b:22};
-  const vals = []; P.forEach(p => { [p.y, p.lo, p.hi].forEach(v => ok(v) && vals.push(v)); });
+  const vals = [];
+  if(o.noLast){
+    // escala por el mid: una punta absurda no aplasta el gráfico (la banda se recorta)
+    P.forEach(p => { if(ok(p.lo) && ok(p.hi)) vals.push((p.lo+p.hi)/2); });
+  } else P.forEach(p => { [p.y, p.lo, p.hi].forEach(v => ok(v) && vals.push(v)); });
+  if(!vals.length){ host.innerHTML = '<p class="sub" style="padding:10px 0">'+(o.empty || 'Sin puntas registradas todavía.')+'</p>'; return; }
   if(ok(o.ref)) vals.push(o.ref);
   let ylo = Math.min(...vals), yhi = Math.max(...vals);
   const pad = (yhi-ylo)*0.12 || Math.abs(yhi)*0.002 || 1; ylo -= pad; yhi += pad;
   const xs = P.map(p => +p.x); let xlo = Math.min(...xs), xhi = Math.max(...xs); if(xhi === xlo) xhi = xlo + 60000;
   const X = t => m.l + (t-xlo)/(xhi-xlo)*(W-m.l-m.r), Y = v => H-m.b - (v-ylo)/(yhi-ylo)*(H-m.t-m.b);
   const c = o.color || 'var(--accent)', gid = 'g'+Math.random().toString(36).slice(2,8);
-  let s = '<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="display:block"><defs><linearGradient id="'+gid+'" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="'+c+'" stop-opacity=".28"/><stop offset="1" stop-color="'+c+'" stop-opacity=".02"/></linearGradient></defs>';
+  let s = '<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="display:block"><defs><linearGradient id="'+gid+'" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="'+c+'" stop-opacity=".28"/><stop offset="1" stop-color="'+c+'" stop-opacity=".02"/></linearGradient>'+
+    '<clipPath id="c'+gid+'"><rect x="'+m.l+'" y="'+m.t+'" width="'+(W-m.l-m.r)+'" height="'+(H-m.t-m.b)+'"/></clipPath></defs>';
   for(let j=0;j<=4;j++){ const v = ylo+(yhi-ylo)*j/4, y = Y(v);
     s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y+'" y2="'+y+'" stroke="var(--line)" stroke-width=".6"/><text x="'+(m.l-6)+'" y="'+(y+3.5)+'" text-anchor="end" font-size="9.5" fill="var(--text-dim)">'+o.fy(v)+'</text>'; }
   for(let j=0;j<=4;j++){ const t = xlo+(xhi-xlo)*j/4;
     s += '<text x="'+X(t)+'" y="'+(H-6)+'" text-anchor="middle" font-size="9.5" fill="var(--text-dim)">'+new Date(t).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+'</text>'; }
   // banda bid–offer (por tramos continuos)
   let seg = [];
-  const flush = () => { if(seg.length > 1){ s += '<path d="'+seg.map((p,i)=>(i?'L':'M')+X(+p.x).toFixed(1)+','+Y(p.hi).toFixed(1)).join(' ')+' '+seg.slice().reverse().map(p=>'L'+X(+p.x).toFixed(1)+','+Y(p.lo).toFixed(1)).join(' ')+' Z" fill="'+c+'" opacity=".30"/>'; } seg = []; };
+  const flush = () => { if(seg.length > 1){ s += '<path clip-path="url(#c'+gid+')" d="'+seg.map((p,i)=>(i?'L':'M')+X(+p.x).toFixed(1)+','+Y(p.hi).toFixed(1)).join(' ')+' '+seg.slice().reverse().map(p=>'L'+X(+p.x).toFixed(1)+','+Y(p.lo).toFixed(1)).join(' ')+' Z" fill="'+c+'" opacity=".30"/>'; } seg = []; };
   const GAP = o.gap || 10*60000;
   P.forEach((p,i) => { if(i && +p.x - +P[i-1].x > GAP) flush(); if(ok(p.lo) && ok(p.hi)) seg.push(p); else flush(); }); flush();
   // mid
   const M = P.filter(p => ok(p.lo) && ok(p.hi));
-  if(o.mid !== false && M.length > 1) s += '<path d="'+M.map((p,i)=>((i && +p.x - +M[i-1].x <= GAP)?'L':'M')+X(+p.x).toFixed(1)+','+Y((p.lo+p.hi)/2).toFixed(1)).join(' ')+'" fill="none" stroke="'+c+'" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>';
+  if(o.mid !== false && M.length > 1) s += o.noLast
+    ? '<path d="'+M.map((p,i)=>((i && +p.x - +M[i-1].x <= GAP)?'L':'M')+X(+p.x).toFixed(1)+','+Y((p.lo+p.hi)/2).toFixed(1)).join(' ')+'" fill="none" stroke="'+c+'" stroke-width="1.8" stroke-linejoin="round" clip-path="url(#c'+gid+')"/>'+
+      (()=>{ const lp = M[M.length-1]; return '<circle cx="'+X(+lp.x)+'" cy="'+Y((lp.lo+lp.hi)/2)+'" r="3" fill="'+c+'"/>'; })()
+    : '<path d="'+M.map((p,i)=>((i && +p.x - +M[i-1].x <= GAP)?'L':'M')+X(+p.x).toFixed(1)+','+Y((p.lo+p.hi)/2).toFixed(1)).join(' ')+'" fill="none" stroke="'+c+'" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>';
   // referencia
   if(ok(o.ref)){ const y = Y(o.ref); s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y+'" y2="'+y+'" stroke="var(--text-dim)" stroke-dasharray="5 4" stroke-width="1"/><text x="'+(m.l+4)+'" y="'+(y-4)+'" font-size="9.5" fill="var(--text-dim)">'+o.refLabel+' '+o.fy(o.ref)+'</text>'; }
   // último: área + línea
-  const Ly = P.filter(p => ok(p.y));
+  const Ly = o.noLast ? [] : P.filter(p => ok(p.y));
   const runs = []; let run = [];
   Ly.forEach((p,i) => { if(i && +p.x - +Ly[i-1].x > GAP){ runs.push(run); run = []; } run.push(p); }); runs.push(run);
   for(const R of runs){
@@ -1824,11 +1855,12 @@ function svgBand(host, pts, o){
     const p = P[k], xx = pxs[k]*sx;
     vl.style.display = 'block'; vl.style.left = xx+'px'; vl.style.top = (m.t*sx)+'px'; vl.style.height = ((H-m.b-m.t)*sx)+'px';
     let html = '<b>'+new Date(+p.x).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})+'</b>';
-    if(ok(p.y)) html += '<div>'+lab.y+' <span>'+ft(p.y)+'</span></div>';
+    if(ok(p.y) && !o.noLast) html += '<div>'+lab.y+' <span>'+ft(p.y)+'</span></div>';
     if(ok(p.hi)) html += '<div>'+lab.hi+' <span>'+ft(p.hi)+'</span></div>';
     if(ok(p.lo)) html += '<div>'+lab.lo+' <span>'+ft(p.lo)+'</span></div>';
     if(ok(p.hi) && ok(p.lo)) html += '<div>Mid <span>'+ft((p.hi+p.lo)/2)+'</span></div>';
-    if(ok(o.ref) && ok(p.y)) html += '<div class="d">vs '+o.refLabel+' <span>'+((p.y/o.ref-1)*100>=0?'+':'')+fmt((p.y/o.ref-1)*100,2)+'%</span></div>';
+    const yv = o.noLast ? ((ok(p.hi) && ok(p.lo)) ? (p.hi+p.lo)/2 : null) : p.y;
+    if(ok(o.ref) && ok(yv)) html += '<div class="d">'+(o.noLast?'mid ':'')+'vs '+o.refLabel+' <span>'+((yv/o.ref-1)*100>=0?'+':'')+fmt((yv/o.ref-1)*100,2)+'%</span></div>';
     tip.innerHTML = html; tip.style.display = 'block';
     const tw = tip.offsetWidth; tip.style.left = (xx + 12 + tw > r.width ? xx - tw - 12 : xx + 12)+'px'; tip.style.top = (m.t*sx+4)+'px';
   };
@@ -2080,7 +2112,7 @@ function addFxTab(){
   const panel = document.createElement('div');
   panel.className = 'panel'; panel.id = 'panel-fx';
   panel.innerHTML = '<p class="panel-desc">Dólares financieros en vivo, igual que la hoja MEP_CCL: MEP = AL30 / AL30D, CCL = AL30 / AL30C, Canje = AL30D / AL30C − 1 (último operado). '+
-    'Compra = lo que pagás el dólar (AL30 al ask, D/C al bid); Venta = lo que te pagan (AL30 al bid, D/C al ask). Profundidad en USD con las cantidades en punta. Gráficos: línea = último, banda = compra–venta, punteado = mid, guiones = promedio de la rueda anterior. Pasá el cursor para ver los valores de cada momento. Puntas de todo el día: hoja FX_PUNTAS (Apps Script cada minuto) + lecturas de este tablero cada 15 s.</p>'+
+    'Compra = lo que pagás el dólar (AL30 al ask, D/C al bid); Venta = lo que te pagan (AL30 al bid, D/C al ask). Profundidad en USD con las cantidades en punta. Gráficos: banda = compra–venta, línea = mid, guiones = promedio de la rueda anterior (desde las 10:40, para que se acomoden las puntas). Pasá el cursor para ver los valores de cada momento. Puntas de todo el día: hoja FX_PUNTAS (Apps Script cada minuto) + lecturas de este tablero cada 15 s.</p>'+
     '<div class="fx3" id="fxCards"></div>'+
     '<div class="table-wrap"><table><thead><tr><th>Bono</th><th>MEP último</th><th>MEP compra</th><th>MEP venta</th><th>CCL último</th><th>CCL compra</th><th>CCL venta</th><th>Canje</th><th>Canje MEP→CCL</th><th>Canje CCL→MEP</th></tr></thead><tbody id="fxTable"></tbody></table></div>';
   document.getElementById('panels').appendChild(panel);
@@ -2132,11 +2164,11 @@ function renderFx(){
   const FP = state.fxPuntas || [];
   const t0 = L.fx.length ? L.fx[0][0] : Infinity;
   // filas con puntas: FX_PUNTAS antes de que se abriera el tablero + lecturas del navegador
-  const conPuntas = FP.filter(a => a[0] < t0).concat(L.fx).sort((a,b) => a[0]-b[0]);
+  const enRueda = a => { const d = new Date(a[0]), hm = d.getHours()*100 + d.getMinutes(); return hm >= 1040 && hm <= 1705; };
+  const conPuntas = FP.filter(a => a[0] < t0).concat(L.fx).filter(enRueda).sort((a,b) => a[0]-b[0]);
   const tIni = conPuntas.length ? conPuntas[0][0] : Infinity;
   const sheetPts = (state.fxLog || []).filter(x => x.ts.getTime() < tIni && x.ts.toDateString() === new Date().toDateString());
-  const ser = (iL, iC, iV, sheetKey, scale) => sheetPts.map(x => ({x:x.ts.getTime(), y: x[sheetKey] != null ? x[sheetKey]*scale : null}))
-      .concat(conPuntas.map(a => ({x:a[0], y: a[iL]!=null ? a[iL]*scale : null, lo: a[iV]!=null ? a[iV]*scale : null, hi: a[iC]!=null ? a[iC]*scale : null})));
+  const ser = (iL, iC, iV, sheetKey, scale) => conPuntas.map(a => ({x:a[0], y: a[iL]!=null ? a[iL]*scale : null, lo: a[iV]!=null ? a[iV]*scale : null, hi: a[iC]!=null ? a[iC]*scale : null}));
   const dlt = (v, v0, pct) => (v==null || v0==null || !state.prev) ? '' :
       (pct ? ' <span class="dlt '+(v>v0?'up':v<v0?'dn':'')+'">'+(v>=v0?'+':'')+fmt((v-v0)*100,2)+'%</span>'
            : ' <span class="dlt '+(v>v0?'up':v<v0?'dn':'')+'">'+(v>=v0?'+':'')+fmt((v/v0-1)*100,2)+'%</span>');
@@ -2151,9 +2183,9 @@ function renderFx(){
     fxCard('fxChartCanje', 'Canje MEP → Cable · intradiario', fmtPct(q.canje.last,2), dlt(q.canje.last, prevCanje, true),
       [['Prom. '+(dd||'rueda ant.'), state.prev ? fmtPct(prevCanje,2) : 'cargá la rueda anterior'], ['CCL→MEP / MEP→CCL', fmtPct(q.canje.cclAmep,2)+' / '+fmtPct(q.canje.mepAccl,2)], ['', '']]);
   const fxLab = {y:'Último', hi:'Compra', lo:'Venta'};
-  svgBand(document.getElementById('fxChartMep'), ser(1,2,3,'mep',1), {color:'#e8a33d', fy:v=>fmt(v,1), ft:v=>fmt(v,2), labels:fxLab, ref:prevMep, refLabel:'prom. '+dd, h:190});
-  svgBand(document.getElementById('fxChartCcl'), ser(4,5,6,'ccl',1), {color:'#60a5fa', fy:v=>fmt(v,1), ft:v=>fmt(v,2), labels:fxLab, ref:prevCcl, refLabel:'prom. '+dd, h:190});
-  svgBand(document.getElementById('fxChartCanje'), ser(7,9,8,'canje',100), {color:'#4fd1a5', fy:v=>fmt(v,2)+'%', ft:v=>fmt(v,3)+'%', labels:{y:'Último', hi:'MEP→CCL', lo:'CCL→MEP'}, ref: prevCanje!=null ? prevCanje*100 : null, refLabel:'prom. '+dd, h:190});
+  svgBand(document.getElementById('fxChartMep'), ser(1,2,3,'mep',1), {noLast:true, color:'#e8a33d', fy:v=>fmt(v,1), ft:v=>fmt(v,2), labels:fxLab, ref:prevMep, refLabel:'prom. '+dd, h:190});
+  svgBand(document.getElementById('fxChartCcl'), ser(4,5,6,'ccl',1), {noLast:true, color:'#60a5fa', fy:v=>fmt(v,1), ft:v=>fmt(v,2), labels:fxLab, ref:prevCcl, refLabel:'prom. '+dd, h:190});
+  svgBand(document.getElementById('fxChartCanje'), ser(7,9,8,'canje',100), {noLast:true, color:'#4fd1a5', fy:v=>fmt(v,2)+'%', ft:v=>fmt(v,3)+'%', labels:{y:'Último', hi:'MEP→CCL', lo:'CCL→MEP'}, ref: prevCanje!=null ? prevCanje*100 : null, refLabel:'prom. '+dd, h:190});
   document.getElementById('fxTable').innerHTML = FX_BONDS.map(b => { const x = fxQuotes(b);
     return '<tr><td>'+b+'</td><td>'+fmt(x.mep.last,2)+'</td><td>'+fmt(x.mep.compra,2)+'</td><td>'+fmt(x.mep.venta,2)+'</td>'+
       '<td>'+fmt(x.ccl.last,2)+'</td><td>'+fmt(x.ccl.compra,2)+'</td><td>'+fmt(x.ccl.venta,2)+'</td>'+
@@ -2261,12 +2293,18 @@ function renderResumen(){
   // dónde está entrando el volumen ahora (registro del navegador)
   const flujo = ['tf','cer','tamar','dl',...SOB_TABS].flatMap(id => R(id).filter(r => r._flow && r._flow.flow > 0).map(r => ({t:r.t, id, f:r._flow, fam: DUALES[r.t] ? 'Dual' : TABS.find(t=>t.id===id).label})));
   const seenF = new Set();
-  const topF = flujo.sort((a,b) => (b.f.hot - a.f.hot) || (b.f.share - a.f.share)).filter(x => !seenF.has(x.t) && seenF.add(x.t)).slice(0,12);
-  html += '<div class="card" style="margin-bottom:12px"><h3>Flujo de los últimos 15 minutos</h3>'+(topF.length ?
-    '<div class="alerts" style="margin:0">'+topF.map(x => '<span class="al '+(x.f.dpx>0?'up':x.f.dpx<0?'dn':'')+'" style="'+(x.f.hot?'outline:1px solid var(--warn)':'')+'">'+x.t+' <span class="small">'+x.fam+'</span> '+
-      (isSob(x.id)?fmtUsdK(x.f.flow)+' USD':fmtVolumen(x.f.flow))+' · '+fmt(x.f.share*100,0)+'% del día '+(x.f.dpx==null?'':(x.f.dpx>0?'▲':'▼')+fmt(Math.abs(x.f.dpx*100),2)+'%')+'</span>').join('')+'</div>'+
-    '<div class="note">Ordenado por la porción del volumen del día que entró en los últimos 15 min. Recuadro amarillo = flujo fuerte. Se calcula con lo que registra este tablero mientras está abierto.</div>'
-    : '<div class="note">Todavía no hay registro suficiente: se arma mientras el tablero está abierto en horario de rueda.</div>')+'</div>';
+  const flujoCard = (tit, list) => {
+    const seen = new Set();
+    const top = list.slice().sort((a,b) => (b.f.hot - a.f.hot) || (b.f.share - a.f.share)).filter(x => !seen.has(x.t) && seen.add(x.t)).slice(0,12);
+    return '<div class="card"><h3>'+tit+'</h3>'+(top.length ?
+      '<div class="alerts" style="margin:0">'+top.map(x => '<span class="al '+(x.f.dpx>0?'up':x.f.dpx<0?'dn':'')+'" style="'+(x.f.hot?'outline:1px solid var(--warn)':'')+'">'+x.t+' <span class="small">'+x.fam+'</span> '+
+        (isSob(x.id)?fmtUsdK(x.f.flow)+' USD':fmtVolumen(x.f.flow))+' · '+fmt(x.f.share*100,0)+'% del día '+(x.f.dpx==null?'':(x.f.dpx>0?'▲':'▼')+fmt(Math.abs(x.f.dpx*100),2)+'%')+'</span>').join('')+'</div>'
+      : '<div class="note">Sin flujo registrado todavía.</div>')+'</div>';
+  };
+  html += '<div class="ops-grid" style="grid-template-columns:1fr 1fr">'+
+    flujoCard('Flujo de los últimos 15 min · pesos', flujo.filter(x => !isSob(x.id)))+
+    flujoCard('Flujo de los últimos 15 min · Soberanos USD', flujo.filter(x => isSob(x.id)))+'</div>'+
+    '<div class="note" style="margin:-6px 0 12px">Ordenado por la porción del volumen del día que entró en los últimos 15 min. Recuadro amarillo = flujo fuerte. Se calcula con lo que registra este tablero mientras está abierto (desde las 10:40).</div>';
   const dd = state.prev ? state.prev.date.split('-').reverse().slice(0,2).join('/') : '';
   const dP = x => x.dPx==null ? '—' : '<span class="dlt '+(x.dPx>0?'up':x.dPx<0?'dn':'')+'">'+(x.dPx>0?'+':'')+fmt(x.dPx*100,2)+'%</span>';
   const dR = x => { const v = x.dRate==null ? null : Math.round(x.dRate)/100; return v==null ? '—' : '<span class="dlt '+(v<0?'up':v>0?'dn':'')+'">'+(v>0?'+':'')+fmt(v,2)+'%</span>'; };
