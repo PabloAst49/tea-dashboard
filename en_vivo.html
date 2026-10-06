@@ -196,6 +196,10 @@ tr.detrow td{background:var(--bg3);padding:10px 14px;text-align:left;}
 .alerts .al.up{border-color:rgba(79,209,165,.5);} .alerts .al.dn{border-color:rgba(232,97,95,.5);}
 .leg a,[data-zreset]{color:var(--accent);}
 table.impl td{text-align:right;} table.impl td:first-child,table.impl td:nth-child(2){text-align:left;}
+td.mainrate{font-size:15px;font-weight:700;color:var(--text) !important;}
+.rp{font-family:var(--mono);font-size:12px;color:var(--text-dim);}
+.rp b{color:var(--text);font-size:13px;}
+.ref{font-family:var(--mono);font-size:11.5px;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -400,6 +404,9 @@ const state = {
   hideGrp: {},    // tabId -> Set de grupos ocultos en el gráfico (click en la leyenda)
   fits: {},       // tabId -> {grupo: ajuste log} del último dibujo
   lastRows: {},   // tabId -> filas calculadas del último render
+  lastRowsFull: {}, // idem, con duales (para Implícitas)
+  rp: null,       // riesgo país (Rava vía Web App)
+  sobImplOpen: null,
   pxMode: {},     // tabId -> 'last' | 'bid' | 'ask' (precio con el que se calcula la pestaña)
   pxOv: {},       // tabId -> {clave de precio: precio editado a mano}
   prev: null,     // rueda anterior cargada: {date:'AAAA-MM-DD', px:{ticker:{p, m, so}}}
@@ -1120,6 +1127,8 @@ function renderTable(tab){
   let rows;
   try{ rows = tab.calc(); if(tab.implicit) addImplicit(tab, rows); }
   finally{ state.priceMap = _raw; }
+  state.lastRowsFull[tab.id] = rows;
+  if(tab.id === 'cer' || tab.id === 'tamar' || tab.id === 'dl') rows = rows.filter(r => !DUALES[r.t]);
   const prevRows = calcPrev(tab);
   state.prevRows[tab.id] = prevRows;
   if(state.prev){
@@ -1202,8 +1211,7 @@ function renderTable(tab){
         else {
           const cls = x.d > 0 ? (x.tasa ? 'dn' : 'up') : x.d < 0 ? (x.tasa ? 'up' : 'dn') : '';
           const col = cls === 'up' ? 'var(--accent)' : cls === 'dn' ? 'var(--bad)' : 'var(--text-dim)';
-          td.innerHTML = '<div class="flowc">'+sparkSvg(x.pts, col)+'<span class="dlt '+cls+'" style="min-width:52px;text-align:right">'+
-            (x.tasa ? ((Math.round(x.d)||0)>0?'+':'')+fmt(Math.round(x.d)||0,0)+' pb' : (x.d>0?'+':'')+fmt(x.d*100,2)+'%')+'</span></div>';
+          td.innerHTML = '<div class="flowc">'+sparkSvg(x.pts, col)+'</div>';
           td.title = 'En el día (desde las 10:40): '+(x.tasa ? 'tasa' : 'precio')+' '+(x.tasa ? fmt(x.v0,3)+'% → '+fmt(x.v1,3)+'%' : fmtP(x.v0)+' → '+fmtP(x.v1));
         }
       }
@@ -1249,6 +1257,10 @@ function renderTable(tab){
         const b = row[c.rng[0]], o = row[c.rng[1]];
         const f = x => x==null ? '—' : (c.pct ? fmtPct(x, c.dec) : fmt(x, c.dec));
         td.innerHTML = (v==null ? '—' : '<b>'+f(v)+'</b>') + ((b!=null || o!=null) ? ' <span class="rng">('+f(b)+' – '+f(o)+')</span>' : '');
+      }
+      else if(c.pct && c.k === tab.curveKey){
+        td.textContent = fmtPct(v, c.dec);
+        td.classList.add('mainrate');
       }
       else if(c.pct){
         td.textContent = fmtPct(v, c.dec);
@@ -1892,17 +1904,17 @@ function drawDetail(tab, row){
     '<span>Previo (VWAP '+(dd||'—')+')<b>'+fmtP(pv)+'</b></span><span>Último<b>'+fmtP(q.precio)+'</b></span>'+
     '<span>Bid<b>'+fmtP(q.bid)+'</b></span><span>Offer<b>'+fmtP(q.ask)+'</b></span><span>Mid<b>'+fmtP(mid)+'</b></span>'+
     '<span>Spread<b>'+(sp==null?'—':fmt(sp,2)+'%')+'</b></span><span>Δ vs previo<b class="'+(pv&&q.precio?(q.precio>=pv?'pos':'neg'):'')+'">'+(pv&&q.precio?((q.precio/pv-1)*100>=0?'+':'')+fmt((q.precio/pv-1)*100,2)+'%':'—')+'</b></span></div>'+
-    '<div id="detc-'+tab.id+'"></div><div class="note" style="font-size:11px;color:var(--text-faint)">Línea = último · banda = bid–offer · punteado = mid · guiones = promedio de la rueda anterior. Tasa o precio según el switch "Intradiario en". Se arma con un punto por minuto mientras el tablero está abierto (horario de rueda). Click en la especie para cerrar.</div>';
+    '<div id="detc-'+tab.id+'"></div><div class="note" style="font-size:11px;color:var(--text-faint)">Banda = bid–offer · línea = mid · guiones = promedio de la rueda anterior (desde las 10:40). Tasa o precio según el switch "Intradiario en". Se arma con un punto por minuto mientras el tablero está abierto (horario de rueda). Click en la especie para cerrar.</div>';
   const arr = ilogPx(key);
   const color = isSob(tab.id) ? GRUPO_COLOR[row.grupo] : 'var(--accent)';
   if(state.iunit[tab.id] !== 'px'){
     const R = toRatePts(tab, row.t, key, arr);   // [t, último, tasa al ask (baja), tasa al bid (alta)]
     const refR = row.prevRate != null ? row.prevRate*100 : null;
     svgBand(document.getElementById('detc-'+tab.id), R.map(a => ({x:a[0], y:a[1], lo:a[2], hi:a[3]})),
-      {h:200, fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%', labels:{y:'Último', hi:'Bid', lo:'Offer'}, ref: refR, refLabel:'tasa prom. '+dd, color});
+      {h:200, noLast:true, fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%', labels:{y:'Último', hi:'Bid', lo:'Offer'}, ref: refR, refLabel:'tasa prom. '+dd, color});
   } else {
     svgBand(document.getElementById('detc-'+tab.id), arr.map(a => ({x:a[0], y:a[1], lo:a[2], hi:a[3]})),
-      {h:200, fy: v => fmtP(v), ft: v => fmtP(v), labels:{y:'Último', hi:'Offer', lo:'Bid'}, ref: pv, refLabel:'prom. '+dd, color});
+      {h:200, noLast:true, fy: v => fmtP(v), ft: v => fmtP(v), labels:{y:'Último', hi:'Offer', lo:'Bid'}, ref: pv, refLabel:'prom. '+dd, color});
   }
 }
 
@@ -2376,9 +2388,15 @@ function addImplTab(){
   panel.className = 'panel'; panel.id = 'panel-impl';
   panel.innerHTML = '<p class="panel-desc">Dos especies de distinto tipo con vencimiento parecido. Por defecto cada indexado se compara con la LECAP/BONCAP de vencimiento más cercano; podés elegir otra, la curva TF o una TEM manual. '+
     'Bid = vendo el indexado al bid y compro TF al ask · Offer = compro el indexado al ask y vendo TF al bid. "Hoy" = cómo se movió la implícita en el día, con el último de las dos especies (se arma con el registro del tablero).</p>'+
+    '<div class="card" style="margin-bottom:12px"><h3 id="sobImplTit">Soberanos USD · spreads de TIR</h3><div class="table-wrap"><table class="impl"><thead><tr><th>Relación</th><th>Spread último</th><th>Compro A / vendo B</th><th>Vendo A / compro B</th><th>Mid</th><th>A · precio (bid / ask) · TIR</th><th>B · precio (bid / ask) · TIR</th></tr></thead><tbody id="implSob"></tbody></table></div>'+
+    '<div class="note">Spread = TIR de A − TIR de B (en B, promedio simple de las TIR de sus especies). Compro A / vendo B = A al ask y B al bid (spread más bajo); vendo A / compro B = A al bid y B al ask (el más alto). Click en una fila para ver el intradiario (banda bid–offer y mid, como el dólar). Canal D/C: el de las pestañas de Soberanos.</div></div>'+
     IMPL_FAM.map(f => '<div class="card" style="margin-bottom:12px"><h3>'+f.tit+'</h3><div class="table-wrap"><table class="impl"><thead><tr><th>Especie</th><th>Vto</th><th>Comparable</th><th>TEM TF</th><th>'+f.lab+' (bid – offer)</th><th>Hoy</th>'+
       (f.id==='tamar' ? '<th>TAMAR vigente</th><th>Dif. (pb)</th>' : '')+(f.id==='dl' ? '<th>Deval. mensual</th>' : '')+'</tr></thead><tbody id="impl-'+f.id+'"></tbody></table></div></div>').join('');
   document.getElementById('panels').appendChild(panel);
+  panel.addEventListener('click', (ev) => {
+    const tr = ev.target.closest && ev.target.closest('tr[data-sob]'); if(!tr) return;
+    state.sobImplOpen = state.sobImplOpen === tr.dataset.sob ? null : tr.dataset.sob; renderSobImpl();
+  });
   panel.addEventListener('change', (ev) => {
     const elx = ev.target, t = elx.getAttribute && elx.getAttribute('data-comp'), fam = elx.closest && elx.closest('tbody') && elx.closest('tbody').id.replace('impl-','');
     if(!t || !fam) return;
@@ -2412,12 +2430,60 @@ function implSeries(fam, r){
   for(const a of A){ const tem = temAt(a[0]); if(tem == null || !a[1]) continue; const v = beValue(fam, r, a[1], tem); if(v && v.v != null && isFinite(v.v)) out.push([a[0], v.v, null, null]); }
   return out.length > 1 ? out : null;
 }
+const SOB_IMPL = [
+  {id:'ao27', lab:'AO27 vs prom. BOPREAL 2027', A:['AO27'], B:['BPA7','BPB7','BPC7','BPD7']},
+  {id:'ao28', lab:'AO28 vs prom. BOPREAL 2028', A:['AO28'], B:['BPA8','BPB8']},
+  {id:'al30bp', lab:'AL30 vs prom. BOPREAL 2028', A:['AL30'], B:['BPA8','BPB8']},
+  {id:'l29', lab:'Ley · AL29 vs GD29', A:['AL29'], B:['GD29']},
+  {id:'l30', lab:'Ley · AL30 vs GD30', A:['AL30'], B:['GD30']},
+  {id:'l35', lab:'Ley · AL35 vs GD35', A:['AL35'], B:['GD35']},
+  {id:'l38', lab:'Ley · AE38 vs GD38', A:['AE38'], B:['GD38']},
+  {id:'l41', lab:'Ley · AL41 vs GD41', A:['AL41'], B:['GD41']},
+];
+function sobTabFor(base){ const b = BONDS.find(x => x.base === base); return b ? TABS.find(t => t.id === ({BONARES:'sobAL', GLOBALES:'sobGD', BOPREAL:'sobBP'})[b.grupo]) : null; }
+function tirSob(base, precio){ const tab = sobTabFor(base); if(!tab || !precio) return null; const v = rateAt(tab, base, base + state.moneda, precio); return v == null ? null : v; }
+// precios (último / bid / ask) -> spread en pb; en B promedio simple de las TIR disponibles
+function sobSpread(def, getPx){
+  const avg = (list, side) => { const v = list.map(b => tirSob(b, getPx(b)[side])).filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null; };
+  const A = (side) => avg(def.A, side), B = (side) => avg(def.B, side);
+  const d = (a, b) => (a != null && b != null) ? (a - b)*1e4 : null;
+  const last = d(A('last'), B('last')), lo = d(A('ask'), B('bid')), hi = d(A('bid'), B('ask'));
+  return {last, lo, hi, mid: (lo != null && hi != null) ? (lo+hi)/2 : null};
+}
+function renderSobImpl(){
+  const body = document.getElementById('implSob'); if(!body) return;
+  document.getElementById('sobImplTit').textContent = 'Soberanos USD · spreads de TIR (canal '+state.moneda+')';
+  const pm = state.rawPM || {};
+  const q = b => { const o = pm[b + state.moneda] || {}; return {last:o.precio, bid:o.bid, ask:o.ask}; };
+  const pb = v => v == null ? '—' : (v>0?'+':'')+fmt(v,0)+' pb';
+  const ref = list => list.map(b => { const o = q(b), t = tirSob(b, o.last);
+    return '<div class="ref"><b>'+b+state.moneda+'</b> '+fmtP(o.last)+' <span class="rng">('+fmtP(o.bid)+' / '+fmtP(o.ask)+')</span> · '+fmtPct(t,2)+'</div>'; }).join('');
+  body.innerHTML = SOB_IMPL.map(def => {
+    const s = sobSpread(def, q);
+    let html = '<tr class="sobrow" data-sob="'+def.id+'" style="cursor:pointer"><td><b>'+def.lab+'</b></td><td class="mainrate">'+pb(s.last)+'</td><td>'+pb(s.lo)+'</td><td>'+pb(s.hi)+'</td><td>'+pb(s.mid)+'</td>'+
+      '<td style="text-align:left">'+ref(def.A)+'</td><td style="text-align:left">'+ref(def.B)+'</td></tr>';
+    if(state.sobImplOpen === def.id) html += '<tr class="detrow"><td colspan="7"><div id="sobImplChart"></div></td></tr>';
+    return html;
+  }).join('');
+  const def = SOB_IMPL.find(d => d.id === state.sobImplOpen);
+  if(def){
+    // serie minuto a minuto con las puntas de todas las especies del par
+    const keys = def.A.concat(def.B), series = {};
+    keys.forEach(b => series[b] = new Map(ilogPx(b + state.moneda).map(a => [a[0], a])));
+    const ts = [...(series[keys[0]] || new Map()).keys()].filter(t => keys.every(b => series[b].has(t))).sort((a,b) => a-b);
+    const pts = ts.map(t => { const s = sobSpread(def, b => { const a = series[b].get(t); return {last:a[1], bid:a[2], ask:a[3]}; }); return {x:t, y:s.last, lo:s.lo, hi:s.hi}; });
+    svgBand(document.getElementById('sobImplChart'), pts, {h:200, noLast:true, color:'#c084fc', fy: v => fmt(v,0)+' pb', ft: v => fmt(v,1)+' pb',
+      labels:{y:'Último', hi:'Vendo A / compro B', lo:'Compro A / vendo B'},
+      empty:'El intradiario se arma mientras el tablero está abierto (desde las 10:40), con el registro de todas las especies del par.'});
+  }
+}
 function renderImpl(){
   if(!document.getElementById('panel-impl')) return;
+  renderSobImpl();
   for(const f of IMPL_FAM){
     const body = document.getElementById('impl-'+f.id); if(!body) continue;
     const tab = {id:f.id};
-    const rows = (state.lastRows[f.id] || []).filter(r => !r.err).sort((a,b) => (a.duration||0) - (b.duration||0));
+    const rows = (state.lastRowsFull[f.id] || state.lastRows[f.id] || []).filter(r => !r.err).sort((a,b) => (a.duration||0) - (b.duration||0));
     body.innerHTML = rows.map(r => {
       const v = r[f.key], b = r[f.b], o = r[f.o];
       const ser = implSeries(f.id, r);
