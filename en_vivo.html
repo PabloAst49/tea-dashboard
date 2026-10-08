@@ -396,7 +396,8 @@ const state = {
   priceMap: {},   // ticker -> {precio, volumen, bid, ask, ops}   (de la pestaña BONOS)
   bcraRows: [],   // [{date, cer, tamar, a3500}] ascendente        (de la pestaña BCRA)
   fechaLiquidacion: null,
-  moneda: 'D',    // canal soberanos: D (MEP) o C (CCL)
+  moneda: 'D',    // canal soberanos de referencia (Bonares/BOPREAL)
+  monedaG: {GLOBALES:'C', BONARES:'D', BOPREAL:'D'},   // canal por grupo (default: Globales en C, Bonares y BOPREAL en D)
   DAYS: {},       // histórico de ruedas soberanos (CSV BOLSAR)
   minVol: {},     // tabId -> índice del slider de monto mínimo
   showBA: {},     // tabId -> mostrar barras bid/offer
@@ -813,9 +814,8 @@ function futureCf(bond, liq){
 
 function calcSoberanos(){
   const liq = state.fechaLiquidacion;
-  const suf = state.moneda;
   return BONDS.map(b => {
-    const ticker = b.base + suf;
+    const ticker = b.base + monFor(b.base);
     const px = state.priceMap[ticker];
     const row = {t:b.base, ticker, grupo:b.grupo};
     if(!px || !px.precio){ row.err = 'sin precio de '+ticker+' en la hoja BONOS'; return row; }
@@ -898,21 +898,21 @@ const TABS = [
       {k:'teaIdx', h:'TEA real CER/DL', pct:true, dec:2}, {k:'margenTNA', h:'Margen TNA', pct:true, dec:2},
       {k:'margenTEA', h:'Margen TEA', pct:true, dec:2, hidden:true}, {k:'teaTamar', h:'TEA TAMAR', pct:true, dec:2, hidden:true},
     ]},
-  { id:'sobGD', label:'Globales', curveKey:'tir', curveLabel:'TIR', desc:'Globales (ley NY). TIR (XIRR) y Duration sobre los cashflows de la hoja SOBERANOS. El switch D/C es el mismo para Globales, Bonares y BOPREAL.',
+  { id:'sobGD', label:'Globales', curveKey:'tir', curveLabel:'TIR', desc:'Globales (ley NY). TIR (XIRR) y Duration sobre los cashflows de la hoja SOBERANOS. Cada grupo tiene su propio switch D/C (default: Globales en C, Bonares y BOPREAL en D).',
     calc: () => calcSoberanos().filter(r => r.grupo === 'GLOBALES'),
     cols: [
       {k:'t', h:'Especie'}, {k:'duration', h:'Duration', dec:2},
       {k:'precio', h:'Precio', dec:2}, {k:'volumen', h:'Volumen', dec:0, bar:true},
       {k:'tir', h:'TIR', pct:true, dec:2}, {k:'mDuration', h:'Mod. Duration', dec:2, hidden:true},
     ]},
-  { id:'sobAL', label:'Bonares', curveKey:'tir', curveLabel:'TIR', desc:'Bonares (ley local). TIR (XIRR) y Duration sobre los cashflows de la hoja SOBERANOS. El switch D/C es el mismo para Globales, Bonares y BOPREAL.',
+  { id:'sobAL', label:'Bonares', curveKey:'tir', curveLabel:'TIR', desc:'Bonares (ley local). TIR (XIRR) y Duration sobre los cashflows de la hoja SOBERANOS. Cada grupo tiene su propio switch D/C (default: Globales en C, Bonares y BOPREAL en D).',
     calc: () => calcSoberanos().filter(r => r.grupo === 'BONARES'),
     cols: [
       {k:'t', h:'Especie'}, {k:'duration', h:'Duration', dec:2},
       {k:'precio', h:'Precio', dec:2}, {k:'volumen', h:'Volumen', dec:0, bar:true},
       {k:'tir', h:'TIR', pct:true, dec:2}, {k:'mDuration', h:'Mod. Duration', dec:2, hidden:true},
     ]},
-  { id:'sobBP', label:'BOPREAL', curveKey:'tir', curveLabel:'TIR', desc:'BOPREAL. TIR (XIRR) y Duration sobre los cashflows de la hoja SOBERANOS. El switch D/C es el mismo para Globales, Bonares y BOPREAL.',
+  { id:'sobBP', label:'BOPREAL', curveKey:'tir', curveLabel:'TIR', desc:'BOPREAL. TIR (XIRR) y Duration sobre los cashflows de la hoja SOBERANOS. Cada grupo tiene su propio switch D/C (default: Globales en C, Bonares y BOPREAL en D).',
     calc: () => calcSoberanos().filter(r => r.grupo === 'BOPREAL'),
     cols: [
       {k:'t', h:'Especie'}, {k:'duration', h:'Duration', dec:2},
@@ -923,9 +923,7 @@ const TABS = [
 // Δ contra la rueda anterior: variación de precio y de la tasa de la curva, al lado de la tasa principal
 TABS.forEach(tab => {
   const ip = tab.cols.findIndex(c => c.k === 'precio');
-  tab.cols.splice(ip+1, 0, {k:'hoy', h:'Hoy', hoyCell:true}, {k:'bo', h:'Bid · Offer (mid)', boCell:true});
-  const iv = tab.cols.findIndex(c => c.k === 'volumen');
-  tab.cols.splice(iv+1, 0, {k:'flow', h:'Volumen última hora · últ. 15 min', flowCell:true});
+  tab.cols.splice(ip+1, 0, {k:'hoy', h:'Hoy · precio / volumen', hoyCell:true}, {k:'bo', h:'Bid · Offer (mid)', boCell:true});
   const i = tab.cols.findIndex(c => c.k === tab.curveKey);
   tab.cols.splice(i+1, 0, {k:'prevPx', h:'Precio prom. ant.', prev:true, prevCell:'px'}, {k:'prevRate', h:'Tasa prom. ant.', prev:true, prevCell:'rate'});
 });
@@ -951,10 +949,11 @@ function renderTabs(){
     panel.id = 'panel-'+tab.id;
     const hasHidden = tab.cols.some(c => c.hidden);
     const toggleBtn = hasHidden ? '<button class="col-toggle" id="coltoggle-'+tab.id+'">Mostrar más columnas</button>' : '';
-    const segHtml = isSob(tab.id) ? '<div><span class="seg segMoneda"><button data-m="D" class="on">MEP (D)</button><button data-m="C">CCL (C)</button></span></div>' : '';
+    const gM = isSob(tab.id) ? state.monedaG[TAB_GRUPO[tab.id]] : null;
+    const segHtml = isSob(tab.id) ? '<div><span class="seg segMoneda" data-g="'+TAB_GRUPO[tab.id]+'"><button data-m="D"'+(gM==='D'?' class="on"':'')+'>MEP (D)</button><button data-m="C"'+(gM==='C'?' class="on"':'')+'>CCL (C)</button></span></div>' : '';
     const pxSeg = '<div class="pxbar">Precio: <span class="seg" id="pxseg-'+tab.id+'"><button data-px="last" class="on">Último</button><button data-px="bid">Bid</button><button data-px="ask">Offer</button><button data-px="mid">Mid</button></span>'+
       ' <a href="#" id="pxreset-'+tab.id+'">restaurar precios editados</a> <span class="small" id="pxinfo-'+tab.id+'"></span>'+
-      '<span style="margin-left:auto">Intradiario en: <span class="seg" id="iunit-'+tab.id+'"><button data-u="tasa" class="on">Tasa</button><button data-u="px">Precio</button></span></span></div>';
+      '<span style="margin-left:auto">Intradiario en: <span class="seg" id="iunit-'+tab.id+'"><button data-u="px" class="on">Precio</button><button data-u="tasa">Tasa</button></span></span></div>';
     panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p>'+segHtml+pxSeg+'<div class="alerts" id="alerts-'+tab.id+'"></div>'+toggleBtn+'<div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>'+
       '<div class="chart-wrap"><p class="chart-title">'+tab.curveLabel+' vs Duration</p>'+
       '<div class="chart-ctrl">'+
@@ -1026,7 +1025,7 @@ function renderTabs(){
       renderTable(tab);
     });
     sortState[tab.id] = {col:'duration', dir:1};
-    state.pxMode[tab.id] = 'last'; state.pxOv[tab.id] = {}; state.iunit[tab.id] = 'tasa';
+    state.pxMode[tab.id] = 'last'; state.pxOv[tab.id] = {}; state.iunit[tab.id] = 'px';
     panel.querySelectorAll('#iunit-'+tab.id+' button').forEach(b => b.onclick = () => {
       panel.querySelectorAll('#iunit-'+tab.id+' button').forEach(x => x.classList.toggle('on', x===b));
       state.iunit[tab.id] = b.dataset.u; renderTable(tab);
@@ -1095,8 +1094,10 @@ function renderTabs(){
     };
   });
   document.querySelectorAll('.segMoneda button').forEach(b => b.onclick = () => {
-    state.moneda = b.dataset.m;
-    document.querySelectorAll('.segMoneda button').forEach(x => x.classList.toggle('on', x.dataset.m === state.moneda));
+    const seg = b.closest('.segMoneda'), g = seg.dataset.g;
+    state.monedaG[g] = b.dataset.m;
+    if(g !== 'GLOBALES') state.moneda = b.dataset.m;
+    seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
     SOB_TABS.forEach(id => renderTable(TABS.find(t => t.id === id)));
   });
   addImplTab();
@@ -1209,10 +1210,16 @@ function renderTable(tab){
         const x = row._hoy;
         if(!x){ td.innerHTML = '<span class="rng">—</span>'; }
         else {
-          const cls = x.d > 0 ? (x.tasa ? 'dn' : 'up') : x.d < 0 ? (x.tasa ? 'up' : 'dn') : '';
+          // color según la variación contra la rueda anterior (no contra la apertura)
+          const dd = x.tasa ? (row.dRate == null ? null : -row.dRate) : row.dPx;
+          const cls = dd == null ? '' : dd > 0 ? 'up' : dd < 0 ? 'dn' : '';
           const col = cls === 'up' ? 'var(--accent)' : cls === 'dn' ? 'var(--bad)' : 'var(--text-dim)';
-          td.innerHTML = '<div class="flowc">'+sparkSvg(x.pts, col)+'</div>';
-          td.title = 'En el día (desde las 10:40): '+(x.tasa ? 'tasa' : 'precio')+' '+(x.tasa ? fmt(x.v0,3)+'% → '+fmt(x.v1,3)+'%' : fmtP(x.v0)+' → '+fmtP(x.v1));
+          const f = row._flow, usd = isSob(tab.id);
+          td.innerHTML = '<div class="flowc'+(f && f.hot ? ' hot' : '')+'">'+hoyVolSvg(x.pts, x.bars, col)+
+            '<span class="fv" title="Últimos 15 min">'+(f && f.flow > 0 ? (usd ? fmtUsdK(f.flow) : fmtVolumen(f.flow)) : '')+'</span></div>';
+          td.title = 'Arriba: '+(x.tasa ? 'tasa' : 'precio')+' en el día desde las 10:40 ('+(x.tasa ? fmt(x.v0,3)+'% → '+fmt(x.v1,3)+'%' : fmtP(x.v0)+' → '+fmtP(x.v1))+'). '+
+            'Abajo: volumen operado por minuto, mismo eje de tiempo (amarillo = últimos 15 min). Color = variación vs rueda anterior.'+
+            (f ? ' Últimos 15 min: '+(usd ? fmtUsdK(f.flow)+' USD' : fmtVolumen(f.flow))+' ('+fmt(f.share*100,0)+'% de lo del día)' : '');
         }
       }
       else if(c.flowCell){
@@ -1290,8 +1297,11 @@ function renderSpreadLey(tabId){
   const host = document.getElementById('spread-'+tabId);
   if(!host) return;
   const _s = state.priceMap; state.priceMap = effectivePriceMap(tabId);
-  let rows; try{ rows = calcSoberanos(); } finally{ state.priceMap = _s; }
-  const ch = state.moneda, by = {}; rows.forEach(r => by[r.t] = r);
+  // mismo canal para AL y GD (el de la pestaña en la que se muestra)
+  const ch = state.monedaG[TAB_GRUPO[tabId]] || state.moneda, _g = state.monedaG;
+  state.monedaG = {GLOBALES:ch, BONARES:ch, BOPREAL:ch};
+  let rows; try{ rows = calcSoberanos(); } finally{ state.priceMap = _s; state.monedaG = _g; }
+  const by = {}; rows.forEach(r => by[r.t] = r);
   const px = t => state.priceMap[t] && state.priceMap[t].precio;
   let html = '<p class="chart-title">Spread de legislación (canal '+ch+') · TIR ley local − TIR ley NY</p>'+
     '<div class="table-wrap"><table><thead><tr><th>Par</th><th>Precio AL</th><th>Precio GD</th><th>TIR AL</th><th>TIR GD</th><th>Spread (pb)</th><th>Canje AL (D/C − 1)</th></tr></thead><tbody>';
@@ -1345,7 +1355,9 @@ function parseRateInput(s){
   const n = parseFloat(s);
   return isFinite(n) ? n/100 : null;
 }
-function priceKeyFor(tab, row){ return isSob(tab.id) ? (row.ticker || (row.t + state.moneda)) : row.t; }
+const TAB_GRUPO = {sobGD:'GLOBALES', sobAL:'BONARES', sobBP:'BOPREAL'};
+function monFor(base){ const b = BONDS.find(x => x.base === base); return (b && state.monedaG[b.grupo]) || state.moneda; }
+function priceKeyFor(tab, row){ return isSob(tab.id) ? (row.ticker || (row.t + monFor(row.t))) : row.t; }
 const RATE_CACHE = new Map();
 function rateAt(tab, t, key, precio){
   if(!precio) return null;
@@ -1780,7 +1792,13 @@ function hoyInfo(tab, row){
   if(pts.length < 2) return null;
   const line = pts.map(a => [a[0], a[1], null, null]);   // solo la línea del último, sin banda
   const v0 = pts[0][1], v1 = pts[pts.length-1][1];
-  return {pts: line, v0, v1, tasa, d: tasa ? (v1 - v0)*100 : v1/v0 - 1};   // tasa: en pb (valores en %)
+  const all = ilogPx(key), bars = [];
+  for(let i=1;i<all.length;i++){
+    const a = all[i], b = all[i-1];
+    const dn = (a[4] != null && b[4] != null) ? Math.max(0, a[4] - b[4]) : 0;
+    if(dn > 0) bars.push([a[0], dn * (a[1] || b[1] || 0) / 100]);
+  }
+  return {pts: line, bars, v0, v1, tasa, d: tasa ? (v1 - v0)*100 : v1/v0 - 1};   // tasa: en pb (valores en %)
 }
 // barras de volumen por minuto (última hora); los últimos 15 min resaltados
 function volBarsSvg(bars, tNow){
@@ -1793,6 +1811,27 @@ function volBarsSvg(bars, tNow){
     const hh = Math.max(1.5, v/mx*(H-2));
     const reciente = tNow - t < 15*60000;
     s += '<rect x="'+(i*bw).toFixed(1)+'" y="'+(H-hh).toFixed(1)+'" width="'+Math.max(1, bw-0.4).toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+(reciente ? 'var(--warn)' : 'var(--text-faint)')+'"/>';
+  }
+  return s + '</svg>';
+}
+// precio (o tasa) arriba y volumen por minuto abajo, con el mismo eje de tiempo (10:40 → ahora)
+function hoyVolSvg(pts, bars, col){
+  const W = 132, HP = 24, HV = 13, G = 2, H = HP + G + HV, ok = v => v != null && isFinite(v);
+  const P = pts.filter(a => ok(a[1])); if(P.length < 2) return '';
+  const t0 = P[0][0], tN = Math.max(P[P.length-1][0], ...bars.map(b => b[0]));
+  const X = t => 1 + (t - t0)/((tN - t0) || 1)*(W-2);
+  let lo = Math.min(...P.map(a => a[1])), hi = Math.max(...P.map(a => a[1])); if(hi === lo){ hi += 1e-9; lo -= 1e-9; }
+  const Y = v => HP-2 - (v-lo)/(hi-lo)*(HP-4);
+  let s = '<svg class="spk" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">';
+  s += '<path d="'+P.map((a,i)=>(i?'L':'M')+X(a[0]).toFixed(1)+','+Y(a[1]).toFixed(1)).join(' ')+'" fill="none" stroke="'+col+'" stroke-width="1.3"/>';
+  const yb = H - 0.5, mx = Math.max(0, ...bars.map(b => b[1]));
+  s += '<line x1="0" x2="'+W+'" y1="'+yb+'" y2="'+yb+'" stroke="var(--line)"/>';
+  const bw = Math.max(1, Math.min(3, (W-2)/Math.max(1, (tN - t0)/60000) - 0.3));
+  if(mx > 0) for(const [t, v] of bars){
+    if(t < t0) continue;
+    const hh = Math.max(1, v/mx*(HV-1));
+    const reciente = tN - t < 15*60000;
+    s += '<rect x="'+(X(t) - bw/2).toFixed(1)+'" y="'+(yb - hh).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+(reciente ? 'var(--warn)' : 'var(--text-faint)')+'"/>';
   }
   return s + '</svg>';
 }
@@ -2304,7 +2343,7 @@ function renderResumen(){
   const sob = {}; sobRows.forEach(r => sob[r.t] = r);
   const tir = t => sob[t] ? pc(sob[t].tir) : '—';
   const sp = (sob.AL30 && sob.GD30) ? (sob.AL30.tir - sob.GD30.tir)*1e4 : null;
-  html += card('Soberanos USD · canal '+state.moneda, [
+  html += card('Soberanos USD · Globales '+state.monedaG.GLOBALES+' · Bonares '+state.monedaG.BONARES+' · BOPREAL '+state.monedaG.BOPREAL, [
       ['AL30', tir('AL30')], ['GD30', tir('GD30')], ['AL35', tir('AL35')], ['GD35', tir('GD35')],
       ['Spread ley AL30/GD30', sp == null ? '—' : (sp>0?'+':'')+fmt(sp,0)+' pb'],
     ]);
@@ -2347,7 +2386,7 @@ function renderResumen(){
       (state.prev ? th(id,'dPx','Δ precio vs '+dd)+th(id,'dRate','Δ tasa vs '+dd) : '')+'</tr></thead><tbody>'+
       sortOps(id, list).map(x => '<tr><td>'+x.t+'</td>'+(withFam?'<td class="small" style="text-align:left">'+x.fam+'</td>':'')+'<td>'+fv(x.v)+'</td>'+(state.prev ? '<td>'+dP(x)+'</td><td>'+dR(x)+'</td>' : '')+'</tr>').join('')+
       '</tbody></table></div>'+(state.prev ? '<div class="note">Click en un encabezado para ordenar. Δ contra el precio y la tasa promedio de la rueda '+dd+' (Δ tasa en puntos porcentuales; sin las que vencen en menos de 30 días). Verde = sube el precio / baja la tasa.</div>' : '<div class="note">Click en un encabezado para ordenar. Cargá la rueda anterior (arriba) para ver variaciones.</div>')+'</div>';
-  html += '<div class="ops-grid">'+opsTable('ars', 'Más operadas en pesos · '+ars.length+' especies', ars, true, fmtVolumen)+opsTable('usd', 'Más operadas · Soberanos USD (canal '+state.moneda+') · '+usd.length, usd, true, v => fmtUsdK(v)+' USD')+'</div>';
+  html += '<div class="ops-grid">'+opsTable('ars', 'Más operadas en pesos · '+ars.length+' especies', ars, true, fmtVolumen)+opsTable('usd', 'Más operadas · Soberanos USD (GD '+state.monedaG.GLOBALES+' · AL/BP '+state.monedaG.BONARES+') · '+usd.length, usd, true, v => fmtUsdK(v)+' USD')+'</div>';
   html += '<div class="rs-grid">';
 
   // Ricos / baratos contra la curva
@@ -2559,7 +2598,7 @@ function renderRel(S, Lg){
   const box = document.getElementById('relBox'); if(!box) return;
   if(!S || !Lg){ box.innerHTML = ''; return; }
   const f = FWD_FAM[state.fwd.fam], tab = TABS.find(t => t.id === f.tab);
-  const kS = isSob(tab.id) ? S.t + state.moneda : S.t, kL = isSob(tab.id) ? Lg.t + state.moneda : Lg.t;
+  const kS = isSob(tab.id) ? S.t + monFor(S.t) : S.t, kL = isSob(tab.id) ? Lg.t + monFor(Lg.t) : Lg.t;
   const pm = state.rawPM || {}, qS = pm[kS] || {}, qL = pm[kL] || {};
   const r = (t, k, p) => { const v = rateAt(tab, t, k, p); return v == null ? null : v*1e4; };
   const dif = (a, b) => (a != null && b != null) ? a - b : null;
@@ -2635,7 +2674,7 @@ function renderFwd(){
   selL.innerHTML = longer.map(x => '<option value="'+x.t+'"'+(x.t===state.fwd.l?' selected':'')+'>'+legLabel(x)+'</option>').join('');
   const pc = v => v==null ? '—' : fmtPct(v, 2);
   const px = v => v==null ? '—' : fmt(v, v>=1000?2:(v<1?4:3));
-  const extra = isSob(FWD_FAM[state.fwd.fam].tab) ? ' · canal '+state.moneda+' (el de las pestañas de Soberanos) · solo pares con ≥60 días de diferencia de duration' : '';
+  const extra = isSob(FWD_FAM[state.fwd.fam].tab) ? ' · canal de cada grupo (Globales '+state.monedaG.GLOBALES+', Bonares '+state.monedaG.BONARES+') · solo pares con ≥60 días de diferencia de duration' : '';
   if(!S || !L){ body.innerHTML = '<tr><td colspan="6" class="err-row">Elegí una corta y una larga.</td></tr>'; document.getElementById('fwdInfo').textContent = ''; }
   else {
     const f0 = fwdRate(S.yl, L.yl);
@@ -2705,7 +2744,7 @@ async function saveHistToDb(){
   }catch(e){ console.error('No pude guardar el histórico', e); }
 }
 function dayEntryFor(base, dayObj){
-  const suf = state.moneda;
+  const suf = monFor(base);
   const alt = suf==='D' ? 'C' : 'D';
   if(dayObj[base+suf]) return {v:dayObj[base+suf], suf};
   if(dayObj[base+alt]) return {v:dayObj[base+alt], suf:alt};
@@ -2805,7 +2844,7 @@ function renderHistMain(){
   const bond = BONDS.find(b => b.base===HSEL);
   const s = historySeries(HSEL);
   if(!s.length){
-    main.innerHTML = '<div><b>'+HSEL+'</b> <span class="sub">'+bond.grupo+'</span></div><p class="sub">Sin datos históricos todavía para esta especie con el canal '+state.moneda+' — cargá CSV o probá el otro canal.</p>';
+    main.innerHTML = '<div><b>'+HSEL+'</b> <span class="sub">'+bond.grupo+'</span></div><p class="sub">Sin datos históricos todavía para esta especie con el canal '+monFor(HSEL)+' — cargá CSV o probá el otro canal.</p>';
     return;
   }
   const last = s[s.length-1], first = s[0];
