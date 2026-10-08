@@ -961,7 +961,7 @@ function renderTabs(){
     const pxSeg = '<div class="pxbar">Precio: <span class="seg" id="pxseg-'+tab.id+'"><button data-px="last" class="on">Último</button><button data-px="bid">Bid</button><button data-px="ask">Offer</button><button data-px="mid">Mid</button></span>'+
       ' <a href="#" id="pxreset-'+tab.id+'">restaurar precios editados</a> <span class="small" id="pxinfo-'+tab.id+'"></span>'+
       '<span style="margin-left:auto">Intradiario en: <span class="seg" id="iunit-'+tab.id+'"><button data-u="px" class="on">Precio</button><button data-u="tasa">Tasa</button></span></span></div>';
-    panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p>'+segHtml+pxSeg+'<div class="alerts" id="alerts-'+tab.id+'"></div>'+toggleBtn+'<div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>'+implBoxHtml(tab)+
+    panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p>'+segHtml+pxSeg+'<div class="alerts" id="alerts-'+tab.id+'"></div>'+toggleBtn+'<div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>'+
       '<div class="chart-wrap"><p class="chart-title">'+tab.curveLabel+' vs Duration</p>'+
       '<div class="chart-ctrl">'+
         '<label>Monto mínimo <input type="range" min="0" max="'+(VOL_STEPS[volUnit(tab.id)].length-1)+'" step="1" value="0" id="minvol-'+tab.id+'"> <b id="minvolLbl-'+tab.id+'">todas</b></label>'+
@@ -974,8 +974,9 @@ function renderTabs(){
         '<input id="calcRate-'+tab.id+'" placeholder="tasa"> % <span class="small">'+tab.curveLabel+'</span>'+
         '<span id="calcRef-'+tab.id+'"></span><span class="out" id="calcOut-'+tab.id+'"></span></div>'+
       '<div id="chart-'+tab.id+'"></div></div>'+
-      '';
+      fwdSectionHtml(tab)+implBoxHtml(tab)+parSectionHtml(tab);
     panels.appendChild(panel);
+    wireFwd(tab, panel);
 
     if(hasHidden){
       const btn = panel.querySelector('#coltoggle-'+tab.id);
@@ -1001,7 +1002,7 @@ function renderTabs(){
       const d = ev.target.closest && ev.target.closest('[data-det]'); if(!d) return;
       state.detail[tab.id] = d.getAttribute('data-det'); renderTable(tab);
     });
-    const ib = panel.querySelector('.implbox');
+    const ib = panel.querySelector('.implmain');
     if(ib){
       ib.addEventListener('click', (ev) => onSobImplClick(ev, () => renderImplBox(tab)));
       ib.addEventListener('change', (ev) => {
@@ -1124,8 +1125,6 @@ function renderTabs(){
     seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
     SOB_TABS.forEach(id => renderTable(TABS.find(t => t.id === id)));
   });
-  addImplTab();
-  addFwdTab();
   addFxTab();
   addResumenTab();
 }
@@ -1313,6 +1312,8 @@ function renderTable(tab){
   state.lastRows[tab.id] = rows;
   refreshCalc(tab);
   renderImplBox(tab);
+  const _p = document.getElementById('panel-'+tab.id);
+  if(_p && _p.classList.contains('active')) renderFwdTab(tab.id);   // forwards y par: solo la pestaña visible (es lo más pesado)
 }
 
 /* ---- Spread de legislación: TIR Bonar (ley local) − TIR Global (ley NY), mismo canal de precio. Réplica de SOBERANOS!F24:F28 ---- */
@@ -2665,9 +2666,9 @@ function renderDualBox(head, body){
 /* ---- bloque de implícitas dentro de cada pestaña de instrumento ---- */
 function implBoxHtml(tab){
   const f = IMPL_FAM.find(x => x.id === tab.id);
-  if(f) return '<div class="card implbox"><h3>'+f.tit+'</h3><div class="table-wrap"><table class="impl"><thead id="implxh-'+tab.id+'">'+implHeadHtml(f)+'</thead><tbody id="implx-'+f.id+'"></tbody></table></div><div class="note">'+IMPL_NOTE+'</div></div>';
-  if(tab.id === 'dual') return '<div class="card implbox"><h3>Costo de la opcionalidad · dual vs curvas puras</h3><div class="table-wrap"><table class="impl"><thead id="implxh-dual"></thead><tbody id="implx-dual"></tbody></table></div><div class="note">'+DUAL_NOTE+'</div></div>';
-  if(isSob(tab.id)) return '<div class="card implbox"><h3>Implícitas · spreads de TIR</h3><div class="table-wrap"><table class="impl"><thead id="implxh-'+tab.id+'">'+sobHead()+'</thead><tbody id="implx-'+tab.id+'"></tbody></table></div><div class="note">'+SOB_NOTE+'</div></div>';
+  if(f) return '<div class="card implbox implmain"><h3>'+f.tit+'</h3><div class="table-wrap"><table class="impl"><thead id="implxh-'+tab.id+'">'+implHeadHtml(f)+'</thead><tbody id="implx-'+f.id+'"></tbody></table></div><div class="note">'+IMPL_NOTE+'</div></div>';
+  if(tab.id === 'dual') return '<div class="card implbox implmain"><h3>Costo de la opcionalidad · dual vs curvas puras</h3><div class="table-wrap"><table class="impl"><thead id="implxh-dual"></thead><tbody id="implx-dual"></tbody></table></div><div class="note">'+DUAL_NOTE+'</div></div>';
+  if(isSob(tab.id)) return '<div class="card implbox implmain"><h3>Implícitas · spreads de TIR</h3><div class="table-wrap"><table class="impl"><thead id="implxh-'+tab.id+'">'+sobHead()+'</thead><tbody id="implx-'+tab.id+'"></tbody></table></div><div class="note">'+SOB_NOTE+'</div></div>';
   return '';
 }
 function renderImplBox(tab){
@@ -2727,7 +2728,7 @@ function renderImpl(){
    · Último:  último operado en las dos.
    · Acortar (compro corta al ask, vendo larga al bid)  → tasa fwd más alta  = FWD BID.
    · Estirar (compro larga al ask, vendo corta al bid)  → tasa fwd más baja  = FWD OFFER.            */
-state.fwd = {fam:'tf', s:'', l:''};
+state.fwdT = {};   // por pestaña: {s, l} = corta y larga del par elegido
 // Forward a partir de tasa efectiva anual y duration: (1+yL)^DL / (1+yS)^DS en (DL − DS) años.
 // En cero cupón (TF, CER, TAMAR, DL) la duration es el plazo y el resultado es exacto; en Soberanos y CER con cupones es la aproximación por duration (Macaulay).
 const FWD_FAM = {
@@ -2744,25 +2745,25 @@ function rowsWithMap(tabId, pm){
   state.priceMap = pm;
   try{ return tab.calc(); } finally{ state.priceMap = saved; }
 }
-function fwdLegs(){
-  const f = FWD_FAM[state.fwd.fam], tab = TABS.find(t => t.id === f.tab);
+function fwdLegs(famId){
+  const f = FWD_FAM[famId], tab = TABS.find(t => t.id === f.tab);
   const baseMap = effectivePriceMap(f.tab, 'last'); // último (o editado a mano)
   const raw = state.rawPM || state.priceMap;
   const ok = x => x && !x.err && x[f.key] != null && isFinite(x[f.key]) && x.duration > 0;
-  const base = rowsWithMap(f.tab, baseMap).filter(ok).filter(r => !f.grupo || r.grupo === f.grupo);
+  const base = rowsWithMap(f.tab, baseMap).filter(ok).filter(r => !f.grupo || r.grupo === f.grupo).filter(r => !DUALES[r.t]);
   return base.map(r => {
-    const key = priceKeyFor(tab, r), q = raw[key] || {};
+    const key = priceKeyFor(tab, r), q = sanePx(raw[key]);
     const at = p => {
       if(!p) return null;
       const pm = Object.assign({}, baseMap); pm[key] = Object.assign({}, baseMap[key] || {}, {precio:p});
       const x = rowsWithMap(f.tab, pm).find(z => z.t === r.t);
       return ok(x) ? {y:x[f.key], D:x.duration, p} : null;
     };
-    return {t:r.t, vto:r.vto, D:r.duration, last:r.precio, bid:q.bid||null, ask:q.ask||null,
+    return {t:r.t, vto:r.vto, D:r.duration, last:r.precio, bid:q.bid, ask:q.ask,
             yl:{y:r[f.key], D:r.duration, p:r.precio}, yb:at(q.bid), ya:at(q.ask)};
   }).sort((a,b) => a.D - b.D);
 }
-function fwdMinSpan(){ const f = FWD_FAM[state.fwd.fam]; return (f.minDias || 1)/365; }
+function fwdMinSpan(famId){ const f = FWD_FAM[famId]; return (f.minDias || 1)/365; }
 function fwdRate(s, l){
   if(!s || !l || !(l.D > s.D)) return null;
   const ratio = Math.pow(1+l.y, l.D) / Math.pow(1+s.y, s.D), span = l.D - s.D;
@@ -2770,20 +2771,92 @@ function fwdRate(s, l){
   return {tea, tem: Math.pow(1+tea, 1/12) - 1, tna: (ratio-1)/span, dias: Math.round(span*365)};
 }
 const legLabel = x => x.t + (x.vto ? ' ('+x.vto.split('-').reverse().join('/')+')' : ' (dur '+fmt(x.D,2)+')');
-/* ---- Relativos: dos especies de la misma curva ----
-   Spread de tasa (larga − corta) en pb y ratio de precios (corta / larga), intradiario con banda de puntas. */
-function renderRel(S, Lg){
-  const box = document.getElementById('relBox'); if(!box) return;
+
+/* ---- dentro de cada pestaña, debajo de la curva: Forwards entre especies · Implícitas · Par de especies (como el Histórico) ---- */
+function fwdSectionHtml(tab){
+  if(!FWD_FAM[tab.id]) return '';
+  const id = tab.id;
+  return '<div class="card implbox" id="fwdsec-'+id+'"><h3>Forwards entre especies · tramos consecutivos</h3>'+
+      '<div class="table-wrap"><table class="impl"><thead><tr><th>Tramo</th><th>Desde</th><th>Hasta</th><th>Días</th><th>TEM fwd</th><th>FWD bid</th><th>FWD offer</th><th>TEA fwd</th></tr></thead><tbody id="fwdChain-'+id+'"></tbody></table></div>'+
+      '<div class="note">Forward entre cada especie y la siguiente que vence al menos 30 días después (último operado). FWD bid = acortar (compro la corta al ask, vendo la larga al bid) · FWD offer = estirar (compro la larga al ask, vendo la corta al bid). '+
+      'Exacto en cero cupón; en soberanos y multicupón, aproximado por duration (y pide ≥ 60 días de diferencia). Click en un tramo para verlo abajo en Par de especies.</div></div>';
+}
+function parSectionHtml(tab){
+  if(!FWD_FAM[tab.id]) return '';
+  const id = tab.id;
+  return '<div class="card implbox" id="parsec-'+id+'"><h3>Par de especies</h3>'+
+      '<div class="calc" style="margin:0 0 10px">Corta <select id="fwdS-'+id+'"></select> Larga <select id="fwdL-'+id+'"></select><span id="fwdInfo-'+id+'" class="small"></span></div>'+
+      '<div id="relBox-'+id+'"></div>'+
+      '<div class="table-wrap" style="margin-top:10px"><table class="impl"><thead><tr><th>Precio usado</th><th>Corta</th><th>Larga</th><th>TEM fwd</th><th>TNA fwd</th><th>TEA fwd</th></tr></thead><tbody id="fwdBody-'+id+'"></tbody></table></div>'+
+      '<div class="note">Dif. de tasa = '+tab.curveLabel+' de la larga − la corta, en puntos porcentuales. Forward = tasa implícita entre el vencimiento de la corta y el de la larga. Banda = lo que da operar con puntas; el intradiario se arma mientras el tablero está abierto.</div></div>';
+}
+function wireFwd(tab, panel){
+  const id = tab.id; if(!FWD_FAM[id]) return;
+  state.fwdT[id] = state.fwdT[id] || {s:'', l:''};
+  panel.querySelector('#fwdS-'+id).onchange = (e) => { state.fwdT[id].s = e.target.value; renderFwdTab(id); };
+  panel.querySelector('#fwdL-'+id).onchange = (e) => { state.fwdT[id].l = e.target.value; renderFwdTab(id); };
+  panel.querySelector('#fwdChain-'+id).onclick = (e) => {
+    const tr = e.target.closest && e.target.closest('tr[data-s]'); if(!tr) return;
+    state.fwdT[id].s = tr.dataset.s; state.fwdT[id].l = tr.dataset.l; renderFwdTab(id);
+    const ps = document.getElementById('parsec-'+id); if(ps) ps.scrollIntoView({behavior:'smooth', block:'start'});
+  };
+}
+function renderFwdTab(id){
+  const body = document.getElementById('fwdBody-'+id); if(!body) return;
+  const st = state.fwdT[id] = state.fwdT[id] || {s:'', l:''};
+  const legs = fwdLegs(id), span = fwdMinSpan(id);
+  const selS = document.getElementById('fwdS-'+id), selL = document.getElementById('fwdL-'+id);
+  if(!legs.some(x => x.t === st.s)) st.s = legs.length ? legs[0].t : '';
+  const S = legs.find(x => x.t === st.s);
+  const longer = legs.filter(x => S && x.D - S.D >= span);
+  if(!longer.some(x => x.t === st.l)) st.l = longer.length ? longer[0].t : '';
+  const L = legs.find(x => x.t === st.l);
+  selS.innerHTML = legs.slice(0,-1).map(x => '<option value="'+x.t+'"'+(x.t===st.s?' selected':'')+'>'+legLabel(x)+'</option>').join('');
+  selL.innerHTML = longer.map(x => '<option value="'+x.t+'"'+(x.t===st.l?' selected':'')+'>'+legLabel(x)+'</option>').join('');
+  const pc = v => v==null ? '—' : fmtPct(v, 2);
+  const px = v => v==null ? '—' : fmt(v, v>=1000?2:(v<1?4:3));
+  const extra = isSob(id) ? ' · canal '+monFor(st.s || '')+' · solo pares con ≥60 días de diferencia de duration' : '';
+  if(!S || !L){ body.innerHTML = '<tr><td colspan="6" class="err-row">Elegí una corta y una larga.</td></tr>'; document.getElementById('fwdInfo-'+id).textContent = ''; }
+  else {
+    const f0 = fwdRate(S.yl, L.yl);
+    document.getElementById('fwdInfo-'+id).textContent = ' tramo de '+(f0 ? f0.dias : Math.round((L.D-S.D)*365))+' días'+extra;
+    const lines = [
+      ['Último operado (o precio editado)', S.yl, L.yl],
+      ['FWD bid · acortar (compro corta ask, vendo larga bid)', S.ya, L.yb],
+      ['FWD offer · estirar (compro larga ask, vendo corta bid)', S.yb, L.ya],
+    ];
+    body.innerHTML = lines.map(([lab, a, b]) => { const f = fwdRate(a, b);
+      return '<tr><td>'+lab+'</td><td>'+px(a && a.p)+'</td><td>'+px(b && b.p)+'</td>'+
+      '<td class="mainrate">'+pc(f && f.tem)+'</td><td>'+pc(f && f.tna)+'</td><td>'+pc(f && f.tea)+'</td></tr>'; }).join('');
+  }
+  const chain = document.getElementById('fwdChain-'+id);
+  let rowsH = '';
+  for(let i=0;i<legs.length-1;i++){
+    const a = legs[i], b = legs.slice(i+1).find(x => x.D - a.D >= Math.max(span, 30/365));   // tramos de menos de 30 días dan forwards sin sentido
+    if(!b) continue;
+    const fl = fwdRate(a.yl, b.yl), fb = fwdRate(a.ya, b.yb), fo = fwdRate(a.yb, b.ya);
+    if(!fl) continue;
+    const on = (a.t===st.s && b.t===st.l) ? 'background:var(--bg3);' : '';
+    rowsH += '<tr data-s="'+a.t+'" data-l="'+b.t+'" style="cursor:pointer;'+on+'"><td><b>'+a.t+' → '+b.t+'</b></td>'+
+      '<td class="rng">'+(a.vto ? a.vto.split('-').reverse().join('/') : 'dur '+fmt(a.D,2))+'</td><td class="rng">'+(b.vto ? b.vto.split('-').reverse().join('/') : 'dur '+fmt(b.D,2))+'</td><td>'+fl.dias+'</td>'+
+      '<td class="mainrate">'+pc(fl.tem)+'</td><td>'+pc(fb && fb.tem)+'</td><td>'+pc(fo && fo.tem)+'</td><td>'+pc(fl.tea)+'</td></tr>';
+  }
+  chain.innerHTML = rowsH || '<tr><td colspan="8" class="err-row">Sin tramos.</td></tr>';
+  renderRel(S, L, id);
+}
+/* ---- Par de especies: diferencia de tasa (larga − corta) en % y ratio de precios (corta / larga), intradiario con banda de puntas ---- */
+function renderRel(S, Lg, id){
+  const box = document.getElementById('relBox-'+id); if(!box) return;
   if(!S || !Lg){ box.innerHTML = ''; return; }
-  const f = FWD_FAM[state.fwd.fam], tab = TABS.find(t => t.id === f.tab);
-  const kS = isSob(tab.id) ? S.t + monFor(S.t) : S.t, kL = isSob(tab.id) ? Lg.t + monFor(Lg.t) : Lg.t;
-  const pm = state.rawPM || {}, qS = pm[kS] || {}, qL = pm[kL] || {};
+  const tab = TABS.find(t => t.id === id);
+  const kS = isSob(id) ? S.t + monFor(S.t) : S.t, kL = isSob(id) ? Lg.t + monFor(Lg.t) : Lg.t;
+  const pm = state.rawPM || {}, qS = sanePx(pm[kS]), qL = sanePx(pm[kL]);
   const r = (t, k, p) => { const v = rateAt(tab, t, k, p); return v == null ? null : v*100; };   // en %
   const dif = (a, b) => (a != null && b != null) ? a - b : null;
-  const spNow = dif(r(Lg.t,kL,qL.precio), r(S.t,kS,qS.precio));
+  const spNow = dif(r(Lg.t,kL,qL.last), r(S.t,kS,qS.last));
   const spLo = dif(r(Lg.t,kL,qL.ask), r(S.t,kS,qS.bid));      // compro la larga (ask) y vendo la corta (bid)
   const spHi = dif(r(Lg.t,kL,qL.bid), r(S.t,kS,qS.ask));      // compro la corta (ask) y vendo la larga (bid)
-  const rtNow = (qS.precio && qL.precio) ? qS.precio/qL.precio : null;
+  const rtNow = (qS.last && qL.last) ? qS.last/qL.last : null;
   const rtLo = (qS.bid && qL.ask) ? qS.bid/qL.ask : null, rtHi = (qS.ask && qL.bid) ? qS.ask/qL.bid : null;
   const A = ilogPx(kS), B = new Map(ilogPx(kL).map(b => [b[0], b]));
   const spPts = [], rtPts = [];
@@ -2792,96 +2865,21 @@ function renderRel(S, Lg){
     spPts.push({x:a[0], y: dif(r(Lg.t,kL,b[1]), r(S.t,kS,a[1])), lo: dif(r(Lg.t,kL,b[3]), r(S.t,kS,a[2])), hi: dif(r(Lg.t,kL,b[2]), r(S.t,kS,a[3]))});
     rtPts.push({x:a[0], y:(a[1]&&b[1]) ? a[1]/b[1] : null, lo:(a[2]&&b[3]) ? a[2]/b[3] : null, hi:(a[3]&&b[2]) ? a[3]/b[2] : null});
   }
-  const pb = v => pp(v);
   box.innerHTML = '<div class="fx3" style="grid-template-columns:1fr 1fr">'+
-    '<div class="fxc"><h3>Spread de tasa · '+Lg.t+' − '+S.t+' ('+tab.curveLabel+')</h3><div class="bigv">'+pb(spNow)+'</div>'+
-      '<div class="sub2"><span>Compro '+Lg.t+' / vendo '+S.t+' (puntas)</span><b>'+pb(spLo)+'</b></div>'+
-      '<div class="sub2"><span>Compro '+S.t+' / vendo '+Lg.t+' (puntas)</span><b>'+pb(spHi)+'</b></div><div id="relSp" style="margin-top:8px"></div></div>'+
+    '<div class="fxc"><h3>Dif. de tasa · '+Lg.t+' − '+S.t+' ('+tab.curveLabel+')</h3><div class="bigv">'+pp(spNow)+'</div>'+
+      '<div class="sub2"><span>Compro '+Lg.t+' / vendo '+S.t+' (puntas)</span><b>'+pp(spLo)+'</b></div>'+
+      '<div class="sub2"><span>Compro '+S.t+' / vendo '+Lg.t+' (puntas)</span><b>'+pp(spHi)+'</b></div><div id="relSp-'+id+'" style="margin-top:8px"></div></div>'+
     '<div class="fxc"><h3>Ratio de precios · '+S.t+' / '+Lg.t+'</h3><div class="bigv">'+fmt(rtNow,4)+'</div>'+
       '<div class="sub2"><span>Vendo '+S.t+' (bid) / compro '+Lg.t+' (ask)</span><b>'+fmt(rtLo,4)+'</b></div>'+
-      '<div class="sub2"><span>Compro '+S.t+' (ask) / vendo '+Lg.t+' (bid)</span><b>'+fmt(rtHi,4)+'</b></div><div id="relRt" style="margin-top:8px"></div></div></div>';
-  svgBand(document.getElementById('relSp'), spPts, {h:180, color:'#c084fc', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
+      '<div class="sub2"><span>Compro '+S.t+' (ask) / vendo '+Lg.t+' (bid)</span><b>'+fmt(rtHi,4)+'</b></div><div id="relRt-'+id+'" style="margin-top:8px"></div></div></div>';
+  svgBand(document.getElementById('relSp-'+id), spPts, {h:180, color:'#c084fc', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
     labels:{y:'Último', hi:'Compro corta / vendo larga', lo:'Compro larga / vendo corta'}, mid:false,
-    empty:'El spread intradiario se arma mientras el tablero está abierto (necesita registro de las dos especies).'});
-  svgBand(document.getElementById('relRt'), rtPts, {h:180, color:'#60a5fa', fy: v => fmt(v,4), ft: v => fmt(v,5),
+    empty:'La diferencia intradiaria se arma mientras el tablero está abierto (necesita registro de las dos especies).'});
+  svgBand(document.getElementById('relRt-'+id), rtPts, {h:180, color:'#60a5fa', fy: v => fmt(v,4), ft: v => fmt(v,5),
     labels:{y:'Último', hi:'Compro corta / vendo larga', lo:'Vendo corta / compro larga'}, mid:false,
     empty:'El ratio intradiario se arma mientras el tablero está abierto (necesita registro de las dos especies).'});
 }
-function addFwdTab(){
-  if(document.getElementById('panel-fwd')) return;
-  const tabsRow = document.getElementById('tabsRow'), panels = document.getElementById('panels');
-  const el = document.createElement('div');
-  el.className = 'tab'; el.dataset.tab = 'fwd'; el.innerHTML = 'Relativos';
-  el.onclick = () => { switchTab('fwd'); renderFwd(); };
-  tabsRow.appendChild(el);
-  const panel = document.createElement('div');
-  panel.className = 'panel'; panel.id = 'panel-fwd';
-  panel.innerHTML =
-    '<p class="panel-desc">Dos especies de la misma curva: elegí la familia, la corta y la larga. Arriba el spread de tasa y el ratio de precios en el día con la banda que da operar con puntas; abajo el forward del tramo. '+
-    'Con puntas: <b>acortar</b> (compro la corta al ask y vendo la larga al bid) da la tasa fwd más alta = <b>FWD bid</b>; '+
-    '<b>estirar</b> (compro la larga al ask y vendo la corta al bid) da la más baja = <b>FWD offer</b>. Cada familia contra sí misma. '+
-    'En CER es tasa real (CER constante); en DL, tasa en dólares (A3500 constante); en TAMAR, con la TAMAR proyectada de la pestaña. '+
-    'En bonos con cupones (Soberanos, TX26/TX28/DICP) el forward se calcula con TIR y duration: es una aproximación. Si editaste un precio en la pestaña de la familia, el forward lo usa.</p>'+
-    '<div class="calc" id="fwdCtrl">Familia <select id="fwdFam">'+Object.keys(FWD_FAM).map(k => '<option value="'+k+'">'+FWD_FAM[k].label+'</option>').join('')+'</select>'+
-      ' Corta <select id="fwdS"></select> Larga <select id="fwdL"></select><span id="fwdInfo" class="small"></span></div>'+
-    '<div id="relBox"></div><p class="chart-title" style="margin-top:14px">Forward del tramo</p>'+
-    '<div class="table-wrap"><table><thead><tr><th>Precio usado</th><th>Corta</th><th>Larga</th><th>TEM fwd</th><th>TNA fwd</th><th>TEA fwd</th></tr></thead><tbody id="fwdBody"></tbody></table></div>'+
-    '<p class="chart-title" style="margin-top:18px">Tramos consecutivos (último operado) · click en una fila para cargarla arriba</p>'+
-    '<div class="table-wrap"><table><thead><tr><th>Tramo</th><th>Desde</th><th>Hasta</th><th>Días</th><th>TEM fwd último</th><th>FWD bid (TEM)</th><th>FWD offer (TEM)</th><th>TEA fwd último</th></tr></thead><tbody id="fwdChain"></tbody></table></div>';
-  panels.appendChild(panel);
-  panel.querySelector('#fwdFam').onchange = (e) => { state.fwd = {fam:e.target.value, s:'', l:''}; renderFwd(); };
-  panel.querySelector('#fwdS').onchange = (e) => { state.fwd.s = e.target.value; renderFwd(); };
-  panel.querySelector('#fwdL').onchange = (e) => { state.fwd.l = e.target.value; renderFwd(); };
-  panel.querySelector('#fwdChain').onclick = (e) => {
-    const tr = e.target.closest && e.target.closest('tr[data-s]'); if(!tr) return;
-    state.fwd.s = tr.dataset.s; state.fwd.l = tr.dataset.l; renderFwd();
-  };
-}
-function renderFwd(){
-  const body = document.getElementById('fwdBody'); if(!body) return;
-  const famSel = document.getElementById('fwdFam');
-  famSel.value = state.fwd.fam;
-  const legs = fwdLegs();
-  const selS = document.getElementById('fwdS'), selL = document.getElementById('fwdL');
-  if(!legs.some(x => x.t === state.fwd.s)) state.fwd.s = legs.length ? legs[0].t : '';
-  const S = legs.find(x => x.t === state.fwd.s);
-  const longer = legs.filter(x => S && x.D - S.D >= fwdMinSpan());
-  if(!longer.some(x => x.t === state.fwd.l)) state.fwd.l = longer.length ? longer[0].t : '';
-  const L = legs.find(x => x.t === state.fwd.l);
-  selS.innerHTML = legs.slice(0,-1).map(x => '<option value="'+x.t+'"'+(x.t===state.fwd.s?' selected':'')+'>'+legLabel(x)+'</option>').join('');
-  selL.innerHTML = longer.map(x => '<option value="'+x.t+'"'+(x.t===state.fwd.l?' selected':'')+'>'+legLabel(x)+'</option>').join('');
-  const pc = v => v==null ? '—' : fmtPct(v, 2);
-  const px = v => v==null ? '—' : fmt(v, v>=1000?2:(v<1?4:3));
-  const extra = isSob(FWD_FAM[state.fwd.fam].tab) ? ' · canal de cada grupo (Globales '+state.monedaG.GLOBALES+', Bonares '+state.monedaG.BONARES+') · solo pares con ≥60 días de diferencia de duration' : '';
-  if(!S || !L){ body.innerHTML = '<tr><td colspan="6" class="err-row">Elegí una corta y una larga.</td></tr>'; document.getElementById('fwdInfo').textContent = ''; }
-  else {
-    const f0 = fwdRate(S.yl, L.yl);
-    document.getElementById('fwdInfo').textContent = ' tramo de '+(f0 ? f0.dias : Math.round((L.D-S.D)*365))+' días'+extra;
-    const lines = [
-      ['Último operado (o precio editado)', S.yl, L.yl],
-      ['FWD bid · acortar (compro corta ask, vendo larga bid)', S.ya, L.yb],
-      ['FWD offer · estirar (compro larga ask, vendo corta bid)', S.yb, L.ya],
-    ];
-    body.innerHTML = lines.map(([lab, a, b]) => { const f = fwdRate(a, b);
-      return '<tr><td>'+lab+'</td><td>'+px(a && a.p)+'</td><td>'+px(b && b.p)+'</td>'+
-      '<td class="pos"><b>'+pc(f && f.tem)+'</b></td><td>'+pc(f && f.tna)+'</td><td>'+pc(f && f.tea)+'</td></tr>'; }).join('');
-  }
-  const chain = document.getElementById('fwdChain');
-  let rowsH = '';
-  for(let i=0;i<legs.length-1;i++){
-    const a = legs[i], b = legs.slice(i+1).find(x => x.D - a.D >= fwdMinSpan());
-    if(!b) continue;
-    const fl = fwdRate(a.yl, b.yl), fb = fwdRate(a.ya, b.yb), fo = fwdRate(a.yb, b.ya);
-    if(!fl) continue;
-    const on = (a.t===state.fwd.s && b.t===state.fwd.l) ? 'background:var(--bg3);' : '';
-    rowsH += '<tr data-s="'+a.t+'" data-l="'+b.t+'" style="cursor:pointer;'+on+'"><td>'+a.t+' → '+b.t+'</td>'+
-      '<td>'+(a.vto ? a.vto.split('-').reverse().join('/') : 'dur '+fmt(a.D,2))+'</td><td>'+(b.vto ? b.vto.split('-').reverse().join('/') : 'dur '+fmt(b.D,2))+'</td><td>'+fl.dias+'</td>'+
-      '<td class="pos">'+pc(fl.tem)+'</td><td>'+pc(fb && fb.tem)+'</td><td>'+pc(fo && fo.tem)+'</td><td>'+pc(fl.tea)+'</td></tr>';
-  }
-  chain.innerHTML = rowsH || '<tr><td colspan="8" class="err-row">Sin tramos.</td></tr>';
-  renderRel(S, L);
-}
-
+function renderFwd(){ TABS.forEach(t => { const p = document.getElementById('panel-'+t.id); if(p && p.classList.contains('active')) renderFwdTab(t.id); }); }
 
 
 /* ============================== HISTÓRICO SOBERANOS (CSV BOLSAR) ============================== */
