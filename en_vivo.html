@@ -126,6 +126,11 @@ tr.dimrow td{opacity:.35;}
 .ctrlcell .ro{color:var(--text-dim);}
 .ctrlcell .off{color:var(--text-faint);font-size:11px;}
 .spread{margin-top:14px;}
+.implbox{margin:12px 0 4px;}
+.secttl{font-family:var(--mono);font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 6px;display:flex;align-items:center;gap:8px;}
+.secnote{font-family:var(--mono);font-size:11px;color:var(--text-faint);margin:-4px 0 12px;}
+.implbox .note{max-width:1100px;}
+td.mainrate{font-weight:600;}
 .spread table{width:auto;min-width:520px;}
 .pxbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text-dim);font-family:var(--mono);margin:0 0 10px;}
 .pxbar .seg{margin:0;}
@@ -140,7 +145,7 @@ tr.dimrow td{opacity:.35;}
 .card .row{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;font-family:var(--mono);padding:2px 0;}
 .card .row span:first-child{color:var(--text-dim);}
 .card .note{font-size:11px;color:var(--text-faint);margin-top:6px;font-family:var(--mono);}
-.rs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;}
+.rs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-bottom:14px;}
 .fxchart{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px;}
 .prevgrp{margin-left:auto;gap:8px;}
 .prevgrp input[type=file]{width:auto;font-size:11.5px;color:var(--text-dim);background:transparent;border:none;padding:0;}
@@ -412,7 +417,9 @@ const state = {
   pxOv: {},       // tabId -> {clave de precio: precio editado a mano}
   prev: null,     // rueda anterior cargada: {date:'AAAA-MM-DD', px:{ticker:{p, m, so}}}
   prevRows: {},   // tabId -> filas calculadas con los cierres de la rueda anterior
-  opsSort: {},    // orden de las tablas de más operadas del Resumen
+  opsSort: {},
+  flowFilt: 'sig',   // flujo del Resumen: 'sig' = solo lo relevante · 'all' = todo
+  opsAll: false,     // más operadas: top 10 o todas    // orden de las tablas de más operadas del Resumen
   prevSync: false,
   minDur: {},     // tabId -> duration mínima en días para curva y ajuste
   detail: {},     // tabId -> especie con el detalle intradiario abierto
@@ -954,7 +961,7 @@ function renderTabs(){
     const pxSeg = '<div class="pxbar">Precio: <span class="seg" id="pxseg-'+tab.id+'"><button data-px="last" class="on">Último</button><button data-px="bid">Bid</button><button data-px="ask">Offer</button><button data-px="mid">Mid</button></span>'+
       ' <a href="#" id="pxreset-'+tab.id+'">restaurar precios editados</a> <span class="small" id="pxinfo-'+tab.id+'"></span>'+
       '<span style="margin-left:auto">Intradiario en: <span class="seg" id="iunit-'+tab.id+'"><button data-u="px" class="on">Precio</button><button data-u="tasa">Tasa</button></span></span></div>';
-    panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p>'+segHtml+pxSeg+'<div class="alerts" id="alerts-'+tab.id+'"></div>'+toggleBtn+'<div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>'+
+    panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p>'+segHtml+pxSeg+'<div class="alerts" id="alerts-'+tab.id+'"></div>'+toggleBtn+'<div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>'+implBoxHtml(tab)+
       '<div class="chart-wrap"><p class="chart-title">'+tab.curveLabel+' vs Duration</p>'+
       '<div class="chart-ctrl">'+
         '<label>Monto mínimo <input type="range" min="0" max="'+(VOL_STEPS[volUnit(tab.id)].length-1)+'" step="1" value="0" id="minvol-'+tab.id+'"> <b id="minvolLbl-'+tab.id+'">todas</b></label>'+
@@ -967,7 +974,7 @@ function renderTabs(){
         '<input id="calcRate-'+tab.id+'" placeholder="tasa"> % <span class="small">'+tab.curveLabel+'</span>'+
         '<span id="calcRef-'+tab.id+'"></span><span class="out" id="calcOut-'+tab.id+'"></span></div>'+
       '<div id="chart-'+tab.id+'"></div></div>'+
-      ((tab.id==='sobGD' || tab.id==='sobAL') ? '<div class="spread" id="spread-'+tab.id+'"></div>' : '');
+      '';
     panels.appendChild(panel);
 
     if(hasHidden){
@@ -994,6 +1001,22 @@ function renderTabs(){
       const d = ev.target.closest && ev.target.closest('[data-det]'); if(!d) return;
       state.detail[tab.id] = d.getAttribute('data-det'); renderTable(tab);
     });
+    const ib = panel.querySelector('.implbox');
+    if(ib){
+      ib.addEventListener('click', (ev) => onSobImplClick(ev, () => renderImplBox(tab)));
+      ib.addEventListener('change', (ev) => {
+        const elx = ev.target, t = elx.getAttribute && elx.getAttribute('data-comp'); if(!t) return;
+        const cfg = getComp(tab.id, t);
+        if(elx.tagName === 'SELECT'){
+          const v = elx.value;
+          if(v === '__auto') setComp(tab.id, t, {mode:'auto'});
+          else if(v === '__curve') setComp(tab.id, t, {mode:'curve'});
+          else if(v === '__manual') setComp(tab.id, t, {mode:'manual', tem: cfg.lastTem != null ? cfg.lastTem : null});
+          else setComp(tab.id, t, {mode:'tk', tk:v});
+        } else setComp(tab.id, t, {mode:'manual', tem: parseRateInput(elx.value)});
+        renderTable(tab); renderImpl();
+      });
+    }
     tb.addEventListener('click', (ev) => {
       const d = ev.target.closest && ev.target.closest('[data-det]'); if(!d) return;
       const t = d.getAttribute('data-det');
@@ -1016,6 +1039,7 @@ function renderTabs(){
       if(el.tagName === 'SELECT'){
         const v = el.value;
         if(v === '__curve') setComp(tab.id, t, {mode:'curve'});
+        else if(v === '__auto') setComp(tab.id, t, {mode:'auto'});
         else if(v === '__manual') setComp(tab.id, t, {mode:'manual', tem: cfg.lastTem != null ? cfg.lastTem : null});
         else setComp(tab.id, t, {mode:'tk', tk:v});
       } else {
@@ -1288,7 +1312,7 @@ function renderTable(tab){
   renderCurve(tab, rows);
   state.lastRows[tab.id] = rows;
   refreshCalc(tab);
-  if(tab.id === 'sobGD' || tab.id === 'sobAL') renderSpreadLey(tab.id);
+  renderImplBox(tab);
 }
 
 /* ---- Spread de legislación: TIR Bonar (ley local) − TIR Global (ley NY), mismo canal de precio. Réplica de SOBERANOS!F24:F28 ---- */
@@ -1450,10 +1474,10 @@ function updateCalc(tab){
 }
 
 /* ============================== IMPLÍCITAS (breakevens contra tasa fija) ============================== */
-const COMP_KEY = 'envivo_comparables_v1';
+const COMP_KEY = 'envivo_comparables_v2';   // v2: default = curva TF (igual que el Histórico)
 function loadComp(){ try{ return JSON.parse(localStorage.getItem(COMP_KEY)) || {}; }catch(e){ return {}; } }
 state.comp = loadComp();
-function getComp(tabId, t){ return (state.comp[tabId] && state.comp[tabId][t]) || {mode:'auto'}; }
+function getComp(tabId, t){ return (state.comp[tabId] && state.comp[tabId][t]) || {mode:'curve'}; }
 function setComp(tabId, t, cfg){
   const prev = getComp(tabId, t);
   state.comp[tabId] = state.comp[tabId] || {};
@@ -1498,8 +1522,9 @@ function resolveTem(tabId, t, dias, tf){
   }
   if(cfg.mode === 'manual') return {tem: cfg.tem, cfg, note: cfg.tem == null ? 'cargá TEM' : ''};
   if(!tf.fit) return {tem:null, cfg, note:'sin curva TF'};
-  if(dias > tf.maxDias) return {tem:null, cfg, note:'fuera de curva TF'};
   const x = Math.max(dias, 1)/365;
+  // como el Histórico: sin extrapolar fuera del rango de especies del ajuste
+  if(x < tf.fit.xmin - 0.5/365 || x > tf.fit.xmax + 0.5/365) return {tem:null, cfg, note:'fuera de curva TF'};
   return {tem: (tf.fit.a + tf.fit.b*Math.log(x))/100, cfg, note:''};
 }
 
@@ -1545,8 +1570,8 @@ function beValue(tabId, r, precio, tem){
   if(tabId === 'dl'){
     // réplica de DL!Q ("a3500 be") + devaluación mensual desde el A3500 de hoy hasta el fixing (vto -3 hábiles)
     const a3500BE = precio * Math.pow(1+tem, daysBetween(vto, liq)/mesD) / 100;
-    const a3500 = parseA3500();
-    const d = daysBetween(workday(vto, -3), normDate(new Date()));
+    const a3500 = state._a3500 != null ? state._a3500 : parseA3500();
+    const d = daysBetween(workday(vto, -3), state._hoyD || normDate(new Date()));
     return {v: a3500BE, dev: (a3500 && d > 0) ? Math.pow(a3500BE/a3500, mesD/d) - 1 : null};
   }
   return null;
@@ -1562,7 +1587,7 @@ function addImplicit(tab, rows){
     const res = resolveTem(tab.id, r.t, dias, tf);
     r._temTF = res.tem; r._temNote = res.note; r._cfg = res.cfg;
     if(res.tem != null){ const c = getComp(tab.id, r.t); c.lastTem = res.tem; }
-    const q = raw[r.t] || {};
+    const _q = sanePx(raw[r.t]), q = {bid:_q.bid, ask:_q.ask};
     // último / precio de la pestaña
     const main = beValue(tab.id, r, r.precio, res.tem);
     // offer: compro el bono indexado al ask y vendo la TF al bid (TEM de la TF a precio bid)
@@ -1577,7 +1602,7 @@ function addImplicit(tab, rows){
       r.tamarVig = vig && vig.tamar != null ? vig.tamar/100 : null;
       r.tamarDif = (r.tamarVig != null && r.tamarBE != null) ? (r.tamarBE - r.tamarVig)*1e4 : null;
     }
-    if(tab.id === 'dl'){ r.a3500BE = main && main.v; r.devBE = main && main.dev; r.a3500Bid = bid && bid.v; r.a3500Off = off && off.v; }
+    if(tab.id === 'dl'){ r.a3500BE = main && main.v; r.devBE = main && main.dev; r.a3500Bid = bid && bid.v; r.a3500Off = off && off.v; r.devBid = bid && bid.dev; r.devOff = off && off.dev; }
   }
 }
 function lastCerDate(){
@@ -1588,8 +1613,8 @@ function compSelectHtml(tab, row){
   const tf = state._tfOpts || [];
   const cfg = row._cfg || getComp(tab.id, row.t);
   const sel = cfg.mode === 'auto' ? '__auto' : cfg.mode === 'curve' ? '__curve' : cfg.mode === 'manual' ? '__manual' : cfg.tk;
-  let o = '<select data-comp="'+row.t+'"><option value="__auto"'+(sel==='__auto'?' selected':'')+'>TF más cercana'+(cfg.mode==='auto' && cfg.tk ? ' ('+cfg.tk+')' : '')+'</option>'+
-          '<option value="__curve"'+(sel==='__curve'?' selected':'')+'>Curva TF</option>';
+  let o = '<select data-comp="'+row.t+'"><option value="__curve"'+(sel==='__curve'?' selected':'')+'>Curva TF (ajuste)</option>'+
+          '<option value="__auto"'+(sel==='__auto'?' selected':'')+'>TF más cercana'+(cfg.mode==='auto' && cfg.tk ? ' ('+cfg.tk+')' : '')+'</option>';
   for(const t of tf) o += '<option value="'+t+'"'+(cfg.mode==='tk' && sel===t?' selected':'')+'>'+t+'</option>';
   if(cfg.mode==='tk' && !tf.includes(cfg.tk)) o += '<option value="'+cfg.tk+'" selected>'+cfg.tk+'</option>';
   o += '<option value="__manual"'+(sel==='__manual'?' selected':'')+'>Manual</option></select>';
@@ -2267,6 +2292,10 @@ function addResumenTab(){
   const panel = document.createElement('div');
   panel.className = 'panel active'; panel.id = 'panel-res';
   panel.addEventListener('click', (ev) => {
+    const ff = ev.target.closest && ev.target.closest('[data-flowf]');
+    if(ff){ state.flowFilt = ff.dataset.flowf; renderResumen(); return; }
+    const oa = ev.target.closest && ev.target.closest('[data-opsall]');
+    if(oa){ ev.preventDefault(); state.opsAll = !state.opsAll; renderResumen(); return; }
     const t = ev.target.closest && ev.target.closest('th[data-ops]'); if(!t) return;
     const id = t.dataset.ops, k = t.dataset.k, st = state.opsSort[id] || {k:'v', dir:-1};
     state.opsSort[id] = st.k === k ? {k, dir:-st.dir} : {k, dir: (k==='t'||k==='fam') ? 1 : -1};
@@ -2342,10 +2371,10 @@ function renderResumen(){
   const sobRows = SOB_TABS.flatMap(id => R(id));
   const sob = {}; sobRows.forEach(r => sob[r.t] = r);
   const tir = t => sob[t] ? pc(sob[t].tir) : '—';
-  const sp = (sob.AL30 && sob.GD30) ? (sob.AL30.tir - sob.GD30.tir)*1e4 : null;
+  const sp = (sob.AL30 && sob.GD30) ? sobSpread(SOB_IMPL.find(d => d.id === 'l30'), b => { const o = (state.rawPM||{})[b + state.monedaG.GLOBALES] || {}; return {last:o.precio}; }, state.monedaG.GLOBALES).last : null;
   html += card('Soberanos USD · Globales '+state.monedaG.GLOBALES+' · Bonares '+state.monedaG.BONARES+' · BOPREAL '+state.monedaG.BOPREAL, [
       ['AL30', tir('AL30')], ['GD30', tir('GD30')], ['AL35', tir('AL35')], ['GD35', tir('GD35')],
-      ['Spread ley AL30/GD30', sp == null ? '—' : (sp>0?'+':'')+fmt(sp,0)+' pb'],
+      ['Spread ley AL30/GD30 ('+state.monedaG.GLOBALES+')', pp(sp)],
     ]);
   html += '</div>';
 
@@ -2357,18 +2386,24 @@ function renderResumen(){
   // dónde está entrando el volumen ahora (registro del navegador)
   const flujo = ['tf','cer','tamar','dl',...SOB_TABS].flatMap(id => R(id).filter(r => r._flow && r._flow.flow > 0).map(r => ({t:r.t, id, f:r._flow, fam: DUALES[r.t] ? 'Dual' : TABS.find(t=>t.id===id).label})));
   const seenF = new Set();
+  const FLOW_SIG = {ARS: 200e6, USD: 50e3};   // mínimo en 15 min para que aparezca con el filtro "relevante"
   const flujoCard = (tit, list) => {
-    const seen = new Set();
-    const top = list.slice().sort((a,b) => (b.f.hot - a.f.hot) || (b.f.share - a.f.share)).filter(x => !seen.has(x.t) && seen.add(x.t)).slice(0,12);
-    return '<div class="card"><h3>'+tit+'</h3>'+(top.length ?
+    const seen = new Set(), all = state.flowFilt === 'all';
+    const uniq = list.slice().sort((a,b) => (b.f.hot - a.f.hot) || (b.f.flow*(isSob(b.id)?1000:1) - a.f.flow*(isSob(a.id)?1000:1))).filter(x => !seen.has(x.t) && seen.add(x.t));
+    const sig = uniq.filter(x => x.f.hot || (x.f.flow >= FLOW_SIG[isSob(x.id)?'USD':'ARS'] && x.f.share >= 0.05));
+    const top = all ? uniq.slice(0, 20) : sig.slice(0, 6);
+    const hid = uniq.length - top.length;
+    return '<div class="card"><h3>'+tit+(hid > 0 ? ' <span class="small" style="text-transform:none">· '+hid+' ocultas</span>' : '')+'</h3>'+(top.length ?
       '<div class="alerts" style="margin:0">'+top.map(x => '<span class="al '+(x.f.dpx>0?'up':x.f.dpx<0?'dn':'')+'" style="'+(x.f.hot?'outline:1px solid var(--warn)':'')+'">'+x.t+' <span class="small">'+x.fam+'</span> '+
         (isSob(x.id)?fmtUsdK(x.f.flow)+' USD':fmtVolumen(x.f.flow))+' · '+fmt(x.f.share*100,0)+'% del día '+(x.f.dpx==null?'':(x.f.dpx>0?'▲':'▼')+fmt(Math.abs(x.f.dpx*100),2)+'%')+'</span>').join('')+'</div>'
-      : '<div class="note">Sin flujo registrado todavía.</div>')+'</div>';
+      : '<div class="note">'+(uniq.length ? 'Nada relevante en los últimos 15 min.' : 'Sin flujo registrado todavía.')+'</div>')+'</div>';
   };
+  const fseg = '<span class="seg" style="margin-left:8px"><button data-flowf="sig"'+(state.flowFilt!=='all'?' class="on"':'')+'>Relevante</button><button data-flowf="all"'+(state.flowFilt==='all'?' class="on"':'')+'>Todo</button></span>';
+  html += '<div class="secttl">Flujo de los últimos 15 min '+fseg+'</div>';
   html += '<div class="ops-grid" style="grid-template-columns:1fr 1fr">'+
     flujoCard('Flujo de los últimos 15 min · pesos', flujo.filter(x => !isSob(x.id)))+
     flujoCard('Flujo de los últimos 15 min · Soberanos USD', flujo.filter(x => isSob(x.id)))+'</div>'+
-    '<div class="note" style="margin:-6px 0 12px">Ordenado por la porción del volumen del día que entró en los últimos 15 min. Recuadro amarillo = flujo fuerte. Se calcula con lo que registra este tablero mientras está abierto (desde las 10:40).</div>';
+    '<div class="secnote">Relevante = flujo fuerte (recuadro amarillo) o ≥ $200M / USD 50k en 15 min y ≥ 5% de lo del día; máximo 6 por lado, ordenado por monto. Se calcula con lo que registra este tablero mientras está abierto (desde las 10:40).</div>';
   const dd = state.prev ? state.prev.date.split('-').reverse().slice(0,2).join('/') : '';
   const dP = x => x.dPx==null ? '—' : '<span class="dlt '+(x.dPx>0?'up':x.dPx<0?'dn':'')+'">'+(x.dPx>0?'+':'')+fmt(x.dPx*100,2)+'%</span>';
   const dR = x => { const v = x.dRate==null ? null : Math.round(x.dRate)/100; return v==null ? '—' : '<span class="dlt '+(v<0?'up':v>0?'dn':'')+'">'+(v>0?'+':'')+fmt(v,2)+'%</span>'; };
@@ -2384,37 +2419,268 @@ function renderResumen(){
     return '<th data-ops="'+id+'" data-k="'+k+'" style="cursor:pointer" class="'+(st.k===k?'sorted':'')+'">'+lab+(st.k===k?(st.dir>0?' ▲':' ▼'):'')+'</th>'; };
   const opsTable = (id, tit, list, withFam, fv) => '<div class="card"><h3>'+tit+'</h3><div class="table-wrap" style="max-height:520px;overflow:auto"><table><thead><tr>'+th(id,'t','Especie')+(withFam?th(id,'fam','Familia'):'')+th(id,'v','Volumen')+
       (state.prev ? th(id,'dPx','Δ precio vs '+dd)+th(id,'dRate','Δ tasa vs '+dd) : '')+'</tr></thead><tbody>'+
-      sortOps(id, list).map(x => '<tr><td>'+x.t+'</td>'+(withFam?'<td class="small" style="text-align:left">'+x.fam+'</td>':'')+'<td>'+fv(x.v)+'</td>'+(state.prev ? '<td>'+dP(x)+'</td><td>'+dR(x)+'</td>' : '')+'</tr>').join('')+
+      sortOps(id, list).slice(0, state.opsAll ? 1e9 : 10).map(x => '<tr><td>'+x.t+'</td>'+(withFam?'<td class="small" style="text-align:left">'+x.fam+'</td>':'')+'<td>'+fv(x.v)+'</td>'+(state.prev ? '<td>'+dP(x)+'</td><td>'+dR(x)+'</td>' : '')+'</tr>').join('')+
       '</tbody></table></div>'+(state.prev ? '<div class="note">Click en un encabezado para ordenar. Δ contra el precio y la tasa promedio de la rueda '+dd+' (Δ tasa en puntos porcentuales; sin las que vencen en menos de 30 días). Verde = sube el precio / baja la tasa.</div>' : '<div class="note">Click en un encabezado para ordenar. Cargá la rueda anterior (arriba) para ver variaciones.</div>')+'</div>';
-  html += '<div class="ops-grid">'+opsTable('ars', 'Más operadas en pesos · '+ars.length+' especies', ars, true, fmtVolumen)+opsTable('usd', 'Más operadas · Soberanos USD (GD '+state.monedaG.GLOBALES+' · AL/BP '+state.monedaG.BONARES+') · '+usd.length, usd, true, v => fmtUsdK(v)+' USD')+'</div>';
-  html += '<div class="rs-grid">';
+  const opsLink = '<div class="secttl">Más operadas · '+(state.opsAll ? 'todas' : 'top 10')+' · <a href="#" data-opsall="1">'+(state.opsAll ? 'ver solo top 10' : 'ver todas ('+ars.length+' en pesos, '+usd.length+' en USD)')+'</a></div>';
+  const opsHtml = opsLink+'<div class="ops-grid">'+opsTable('ars', 'Más operadas en pesos', ars, true, fmtVolumen)+opsTable('usd', 'Más operadas · Soberanos USD (GD '+state.monedaG.GLOBALES+' · AL/BP '+state.monedaG.BONARES+')', usd, true, v => fmtUsdK(v)+' USD')+'</div>';
+  html += '<div class="secttl">Fuera de curva · las 2 que más pagan y las 2 que menos pagan contra el ajuste de su familia</div><div class="rs-grid">';
 
   // Ricos / baratos contra la curva
   const fams = [['tf','tem','Tasa fija (TEM)'],['cer','tea','CER (TEA real)'],['tamar','margenTNA','TAMAR (margen)'],['dl','tea','DL (TEA)'],['sobGD','tir','Globales (TIR)'],['sobAL','tir','Bonares (TIR)'],['sobBP','tir','BOPREAL (TIR)']];
   for(const [id, key, lab] of fams){
     const res = residuals(id, key);
     if(res.length < 3) continue;
-    const top = res.slice(0,3), bot = res.slice(-3).reverse();
+    const top = res.slice(0,2), bot = res.slice(-2).reverse();
     const f = x => x.t+(x.g?' <span class="small">'+x.g+'</span>':'');
     const fv = isSob(id) ? (v => fmtUsdK(v)) : fmtVolumen;
-    const line = (x, up) => '<tr><td style="text-align:left">'+(up?'▲ ':'▼ ')+f(x)+'</td><td class="'+(up?'pos':'neg')+'">'+(x.dif>0?'+':'')+fmt(x.dif,0)+' pb</td><td>'+fv(x.vol)+'</td>'+
+    const line = (x, up) => '<tr><td style="text-align:left">'+(up?'▲ ':'▼ ')+f(x)+'</td><td class="'+(up?'pos':'neg')+'">'+pp(x.dif/100)+'</td><td>'+fv(x.vol)+'</td>'+
       (state.prev ? '<td>'+dR(x)+'</td>' : '')+'</tr>';
     html += '<div class="card"><h3>'+lab+' · vs curva</h3><table class="mini"><thead><tr><th style="text-align:left">Especie</th><th>vs curva</th><th>Volumen</th>'+(state.prev?'<th>Δ tasa</th>':'')+'</tr></thead><tbody>'+
       top.map(x => line(x, true)).join('') + bot.map(x => line(x, false)).join('') +
       '</tbody></table><div class="note">▲ paga más que su curva · ▼ paga menos · sin especies que vencen en menos de 30 días</div></div>';
   }
-  html += '</div>';
+  html += '</div>' + opsHtml;
   body.innerHTML = html;
 }
 
-/* ============================== IMPLÍCITAS (pestaña propia) ==============================
-   Indexado (CER / TAMAR / DL) contra tasa fija: por defecto la TF con vencimiento más cercano. Mismas fórmulas que antes
-   (réplica de CER!K, TAMAR!K y DL!Q). "Hoy" = evolución intradiaria con el último de las dos especies (registro del tablero). */
+/* ============================== IMPLÍCITAS ==============================
+   Indexado (CER / TAMAR / DL) contra tasa fija. Mismas fórmulas y misma regla que el Histórico:
+   por defecto la TEM de la curva TF (ajuste logarítmico) a la duration del indexado, sin extrapolar fuera del rango del ajuste.
+   CER: réplica de CER!K · TAMAR: réplica de TAMAR!K (TAMAR BE) · DL: A3500 BE (DL!Q) y devaluación mensual implícita hasta vto − 3 hábiles.
+   Se muestran en cada pestaña (debajo de la tabla) y todas juntas en la pestaña Implícitas. "Hoy" = la implícita minuto a minuto. */
+const pp = (v, d) => v == null || !isFinite(v) ? '—' : (v>0?'+':'')+fmt(v, d==null?2:d)+'%';   // diferencias de tasa, en puntos porcentuales
 const IMPL_FAM = [
-  {id:'cer',   tit:'Inflación implícita · CER vs tasa fija',     key:'inflBE', b:'inflBid', o:'inflOff', fmtV: v => fmtPct(v,2), lab:'Infl. mensual'},
-  {id:'tamar', tit:'TAMAR implícita · TAMAR vs tasa fija',       key:'tamarBE', b:'tamarBid', o:'tamarOff', fmtV: v => fmtPct(v,2), lab:'TAMAR TNA'},
-  {id:'dl',    tit:'Devaluación implícita · DL vs tasa fija',     key:'a3500BE', b:'a3500Bid', o:'a3500Off', fmtV: v => fmt(v,2), lab:'A3500'},
+  {id:'cer',   tit:'Inflación implícita · CER vs tasa fija',   key:'inflBE', b:'inflBid', o:'inflOff', fmtV: v => fmtPct(v,2), lab:'Infl. mensual'},
+  {id:'tamar', tit:'TAMAR implícita (BE) · TAMAR vs tasa fija', key:'tamarBE', b:'tamarBid', o:'tamarOff', fmtV: v => fmtPct(v,2), lab:'TAMAR BE (TNA)'},
+  {id:'dl',    tit:'Devaluación implícita · DL vs tasa fija',   key:'devBE', b:'devBid', o:'devOff', fmtV: v => fmtPct(v,2), lab:'Deval. mensual'},
 ];
+function implHeadHtml(f){
+  return '<tr><th>Especie</th><th>Vto</th><th>Comparable</th><th>TEM TF</th><th>'+f.lab+'</th><th>Bid – Offer</th><th>Hoy</th>'+(state.prev ? '<th>Δ vs '+prevLbl()+'</th>' : '')+
+    (f.id==='tamar' ? '<th>TAMAR vigente</th><th>BE − vigente</th>' : '')+(f.id==='dl' ? '<th>A3500 BE</th>' : '')+'</tr>';
+}
+function implRowsFor(famId){
+  return (state.lastRowsFull[famId] || state.lastRows[famId] || []).filter(r => !r.err && !DUALES[r.t]).sort((a,b) => (a.duration||0) - (b.duration||0));
+}
+function implBodyHtml(f, rows){
+  const tab = {id:f.id}, pv = prevImplMap(f.id);
+  return rows.map(r => {
+    const v = r[f.key], b = r[f.b], o = r[f.o];
+    const ser = implSeries(f.id, r, f.key === 'devBE');
+    let hoy = '<span class="rng">—</span>';
+    if(ser){
+      const d = ser[ser.length-1][1] - ser[0][1];
+      hoy = '<div class="flowc">'+sparkSvg(ser, d>0?'var(--bad)':d<0?'var(--accent)':'var(--text-dim)')+'<span class="dlt '+(d>0?'dn':d<0?'up':'')+'">'+pp(d*100)+'</span></div>';
+    }
+    return '<tr><td><b>'+r.t+'</b></td><td class="rng">'+(r.vto ? r.vto.split('-').reverse().join('/') : '')+'</td>'+
+      '<td class="ctrlcell">'+compSelectHtml(tab, r)+'</td><td class="ctrlcell">'+temTFHtml(tab, r)+'</td>'+
+      '<td class="mainrate">'+(v==null ? '<span class="rng">'+(r._temNote || '—')+'</span>' : f.fmtV(v))+'</td>'+
+      '<td class="rng">'+(b==null?'—':f.fmtV(b))+' – '+(o==null?'—':f.fmtV(o))+'</td>'+
+      '<td>'+hoy+'</td>'+
+      (state.prev ? '<td>'+((v != null && pv && pv[r.t] != null) ? pp((v - pv[r.t])*100) : '<span class="rng">—</span>')+'</td>' : '')+
+      (f.id==='tamar' ? '<td>'+fmtPct(r.tamarVig,2)+'</td><td class="'+(r.tamarDif>0?'pos':r.tamarDif<0?'neg':'')+'">'+(r.tamarDif==null?'—':pp(r.tamarDif/100))+'</td>' : '')+
+      (f.id==='dl' ? '<td>'+fmt(r.a3500BE,2)+'</td>' : '')+'</tr>';
+  }).join('') || '<tr><td colspan="9" class="rng">Sin especies.</td></tr>';
+}
+const IMPL_NOTE = 'Comparable por defecto: curva TF (ajuste logarítmico de la pestaña Tasa Fija, misma regla que el Histórico; fuera del rango del ajuste no se calcula). Podés elegir la TF más cercana, una especie o una TEM manual. '+
+  'Bid = compro TF al ask y vendo el indexado al bid · Offer = compro el indexado al ask y vendo TF al bid. Hoy = la implícita en el día con el último operado.';
+
+// curva TF minuto a minuto (mismas especies que el ajuste de la pestaña TF), para la implícita intradiaria
+let _tfFitCache = {k:null, m:null};
+function tfFitSeries(){
+  const rows = (state.lastRows.tf || []).filter(r => !r.err);
+  const excl = state.excl.tf || new Set(), thr = volThreshold('tf');
+  const use = rows.filter(r => !excl.has(r.t) && (r.volumen||0) >= thr);
+  const k = use.map(r => r.t).join(',')+'|'+(loadIlog().px[use[0] && use[0].t] || []).length;
+  if(_tfFitCache.k === k) return _tfFitCache.m;
+  const byT = new Map(), mesD = 365/12;
+  for(const r of use){
+    const b = TF.find(x => x.t === r.t); if(!b || !(r.dias > 0)) continue;
+    for(const a of ilogPx(r.t)){ if(!a[1]) continue;
+      if(!byT.has(a[0])) byT.set(a[0], []);
+      byT.get(a[0]).push({x: r.dias/365, y: (Math.pow(b.pago/a[1], mesD/r.dias) - 1)*100});
+    }
+  }
+  const m = new Map();
+  for(const [t, pts] of byT){ const f = logFit(pts); if(f) m.set(t, f); }
+  _tfFitCache = {k, m};
+  return m;
+}
+// serie intradiaria de la implícita: último del indexado y de la TF comparable, minuto a minuto
+function implSeries(fam, r, useDev){
+  const cfg = r._cfg || getComp(fam, r.t);
+  const A = ilogPx(r.t);
+  if(A.length < 2) return null;
+  const mesD = 365/12, dias = r.dias != null ? r.dias : Math.round((r.duration||0)*365);
+  let temAt = null;
+  if((cfg.mode === 'auto' || cfg.mode === 'tk') && cfg.tk){
+    const B = ilogPx(cfg.tk), tfb = TF.find(x => x.t === cfg.tk);
+    if(!B.length || !tfb) return null;
+    const d = daysBetween(parseISO(tfb.vto), state.fechaLiquidacion);
+    const mp = new Map(B.map(b => [b[0], b[1]]));
+    temAt = t => { const p = mp.get(t); return (p && d > 0) ? Math.pow(tfb.pago/p, mesD/d) - 1 : null; };
+  } else if(cfg.mode === 'manual' && cfg.tem != null){ temAt = () => cfg.tem; }
+  else if(cfg.mode === 'curve'){
+    const fits = tfFitSeries(), x = Math.max(dias, 1)/365;
+    temAt = t => { const f = fits.get(t); return (f && x >= f.xmin - 0.5/365 && x <= f.xmax + 0.5/365) ? (f.a + f.b*Math.log(x))/100 : null; };
+  }
+  else return null;
+  const out = [];
+  for(const a of A){ const tem = temAt(a[0]); if(tem == null || !a[1]) continue; const v = beValue(fam, r, a[1], tem);
+    const y = v ? (useDev ? v.dev : v.v) : null; if(y != null && isFinite(y)) out.push([a[0], y, null, null]); }
+  return out.length > 1 ? out : null;
+}
+
+/* ---- Implícitas de la rueda anterior (CSV BOLSAR cargado): misma regla, con precios, liquidación, A3500 y curva TF de esa rueda ---- */
+function withPrev(fn){
+  const P = state.prev; if(!P || !state.bcraRows.length) return null;
+  const pm = {};
+  for(const k in P.px) pm[k] = {precio: P.px[k].p, volumen: P.px[k].m, bid:null, ask:null};
+  const sPM = state.priceMap, sRaw = state.rawPM, sLiq = state.fechaLiquidacion;
+  state.priceMap = pm; state.rawPM = pm; state.fechaLiquidacion = workday(parseISO(P.date), 1); state._a3500 = a3500At(P.date); state._hoyD = normDate(parseISO(P.date));
+  try{ return fn(pm); } catch(e){ console.warn('implícitas rueda anterior', e); return null; }
+  finally{ state.priceMap = sPM; state.rawPM = sRaw; state.fechaLiquidacion = sLiq; state._a3500 = null; state._hoyD = null; }
+}
+const _prevImplCache = {};
+function prevImplMap(famId){
+  const P = state.prev; if(!P) return null;
+  const ck = P.date+'|'+famId+'|'+JSON.stringify(state.comp[famId] || {})+'|'+[...(state.excl.tf || [])].join(',')+'|'+(state.minVol.tf||0);
+  if(_prevImplCache[famId] && _prevImplCache[famId].ck === ck) return _prevImplCache[famId].m;
+  const m = withPrev(() => {
+    const all = calcTF().filter(r => !r.err && r.tem != null && r.duration > 0);
+    const excl = state.excl.tf || new Set(), thr = volThreshold('tf');
+    const fit = logFit(all.filter(r => !excl.has(r.t) && (r.volumen||0) >= thr).map(r => ({x:r.duration, y:r.tem*100})));
+    const temOf = {}; all.forEach(r => temOf[r.t] = r.tem);
+    const tf = {fit, maxDias: all.length ? Math.max(...all.map(r => r.dias)) : 0, rows: all.slice().sort((a,b)=>a.dias-b.dias), temOf};
+    const out = {};
+    for(const r of TABS.find(t => t.id === famId).calc()){
+      if(r.err || !r.precio) continue;
+      const dias = r.dias != null ? r.dias : Math.round(r.duration*365);
+      const res = resolveTem(famId, r.t, dias, tf);
+      const v = beValue(famId, r, r.precio, res.tem);
+      if(v) out[r.t] = famId === 'dl' ? v.dev : v.v;
+    }
+    return out;
+  });
+  _prevImplCache[famId] = {ck, m};
+  return m;
+}
+const prevLbl = () => state.prev ? state.prev.date.split('-').reverse().slice(0,2).join('/') : '';
+
+/* ---- Soberanos: spreads de TIR entre especies (en %). Mismo canal para las dos patas. ---- */
+const SOB_IMPL = [
+  {id:'ao27', lab:'AO27 vs prom. BOPREAL 2027', A:['AO27'], B:['BPA7','BPB7','BPC7','BPD7'], tabs:['sobAL','sobBP']},
+  {id:'ao28', lab:'AO28 vs prom. BOPREAL 2028', A:['AO28'], B:['BPA8','BPB8'], tabs:['sobAL','sobBP']},
+  {id:'al30bp', lab:'AL30 vs prom. BOPREAL 2028', A:['AL30'], B:['BPA8','BPB8'], tabs:['sobAL','sobBP']},
+  {id:'l29', lab:'Ley · AL29 vs GD29', A:['AL29'], B:['GD29'], tabs:['sobGD','sobAL']},
+  {id:'l30', lab:'Ley · AL30 vs GD30', A:['AL30'], B:['GD30'], tabs:['sobGD','sobAL']},
+  {id:'l35', lab:'Ley · AL35 vs GD35', A:['AL35'], B:['GD35'], tabs:['sobGD','sobAL']},
+  {id:'l38', lab:'Ley · AE38 vs GD38', A:['AE38'], B:['GD38'], tabs:['sobGD','sobAL']},
+  {id:'l41', lab:'Ley · AL41 vs GD41', A:['AL41'], B:['GD41'], tabs:['sobGD','sobAL']},
+];
+function sobTabFor(base){ const b = BONDS.find(x => x.base === base); return b ? TABS.find(t => t.id === ({BONARES:'sobAL', GLOBALES:'sobGD', BOPREAL:'sobBP'})[b.grupo]) : null; }
+// canal del par: el del grupo de la pata B (ley → el de Globales; vs BOPREAL → el de BOPREAL), igual para las dos patas
+function sobCanal(def){ const b = BONDS.find(x => x.base === def.B[0]); return (b && state.monedaG[b.grupo]) || state.moneda; }
+function tirSob(base, precio, ch){
+  const tab = sobTabFor(base); if(!tab || !precio) return null;
+  ch = ch || monFor(base);
+  const _g = state.monedaG; state.monedaG = {GLOBALES:ch, BONARES:ch, BOPREAL:ch};
+  try{ const v = rateAt(tab, base, base + ch, precio); return v == null ? null : v; } finally{ state.monedaG = _g; }
+}
+// precios (último / bid / ask) -> spread en puntos porcentuales; en B promedio simple de las TIR disponibles
+function sobSpread(def, getPx, ch){
+  const avg = (list, side) => { const v = list.map(b => tirSob(b, getPx(b)[side], ch)).filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null; };
+  const A = (side) => avg(def.A, side), B = (side) => avg(def.B, side);
+  const d = (a, b) => (a != null && b != null) ? (a - b)*100 : null;
+  const last = d(A('last'), B('last')), lo = d(A('ask'), B('bid')), hi = d(A('bid'), B('ask'));
+  return {last, lo, hi, mid: (lo != null && hi != null) ? (lo+hi)/2 : null};
+}
+// puntas absurdas (ej. un bid de 0,46 con último 52) se descartan: más de 10% lejos del último
+function sanePx(o){ o = o || {}; const L = o.precio, ok = v => v && (!L || Math.abs(v/L - 1) <= 0.10) ? v : null; return {last:L, bid:ok(o.bid), ask:ok(o.ask)}; }
+const sobHead = () => '<tr><th>Relación</th><th>Spread TIR</th>'+(state.prev ? '<th>Δ vs '+prevLbl()+'</th>' : '')+'<th>Compro A / vendo B</th><th>Vendo A / compro B</th><th>A · precio (bid / ask) · TIR</th><th>B · precio (bid / ask) · TIR</th></tr>';
+const SOB_NOTE = 'Spread = TIR de A − TIR de B, en puntos porcentuales (en B, promedio simple de sus TIR). Compro A / vendo B = A al ask y B al bid; vendo A / compro B = A al bid y B al ask. Las dos patas con el mismo canal. Click en una fila para ver el intradiario.';
+function renderSobImplInto(body, defs, cont){
+  if(!body) return;
+  const pm = state.rawPM || {};
+  body.innerHTML = defs.map(def => {
+    const ch = sobCanal(def);
+    const q = b => sanePx(pm[b + ch]);
+    const s = sobSpread(def, q, ch);
+    const ref = list => list.map(b => { const o = q(b), t = tirSob(b, o.last, ch);
+      return '<div class="ref"><b>'+b+ch+'</b> '+fmtP(o.last)+' <span class="rng">('+fmtP(o.bid)+' / '+fmtP(o.ask)+')</span> · '+fmtPct(t,2)+'</div>'; }).join('');
+    const open = state.sobImplOpen === cont+':'+def.id;
+    const sp = state.prev ? withPrev(pm0 => sobSpread(def, b => ({last: pm0[b + ch] && pm0[b + ch].precio}), ch)) : null;
+    const dTd = state.prev ? '<td>'+((sp && sp.last != null && s.last != null) ? pp(s.last - sp.last) : '<span class="rng">—</span>')+'</td>' : '';
+    let html = '<tr class="sobrow" data-sob="'+cont+':'+def.id+'" style="cursor:pointer"><td><b>'+def.lab+'</b> <span class="small">'+ch+'</span></td><td class="mainrate">'+pp(s.last)+'</td>'+dTd+'<td>'+pp(s.lo)+'</td><td>'+pp(s.hi)+'</td>'+
+      '<td style="text-align:left">'+ref(def.A)+'</td><td style="text-align:left">'+ref(def.B)+'</td></tr>';
+    if(open) html += '<tr class="detrow"><td colspan="7"><div id="sobImplChart-'+cont+'"></div></td></tr>';
+    return html;
+  }).join('');
+  const def = defs.find(d => state.sobImplOpen === cont+':'+d.id);
+  if(def){
+    const ch = sobCanal(def), keys = def.A.concat(def.B), series = {};
+    keys.forEach(b => series[b] = new Map(ilogPx(b + ch).map(a => [a[0], a])));
+    const ts = [...(series[keys[0]] || new Map()).keys()].filter(t => keys.every(b => series[b].has(t))).sort((a,b) => a-b);
+    const pts = ts.map(t => { const s = sobSpread(def, b => { const a = series[b].get(t); return {last:a[1], bid:a[2], ask:a[3]}; }, ch); return {x:t, y:s.last, lo:s.lo, hi:s.hi}; });
+    svgBand(document.getElementById('sobImplChart-'+cont), pts, {h:200, noLast:true, color:'#c084fc', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
+      labels:{y:'Último', hi:'Vendo A / compro B', lo:'Compro A / vendo B'},
+      empty:'El intradiario se arma mientras el tablero está abierto (desde las 10:40), con el registro de todas las especies del par.'});
+  }
+}
+function onSobImplClick(ev, rerender){
+  const tr = ev.target.closest && ev.target.closest('tr[data-sob]'); if(!tr) return false;
+  state.sobImplOpen = state.sobImplOpen === tr.dataset.sob ? null : tr.dataset.sob; rerender(); return true;
+}
+
+/* ---- Duales: costo de la opcionalidad = curva pura (ajuste log de la pestaña, a la duration del dual) − rendimiento del dual, en cada pata ---- */
+const DUAL_NOTE = 'Costo de la opción = lo que rinde la curva pura a la duration del dual (ajuste logarítmico de la pestaña CER, DL o TAMAR, interpolado) menos lo que rinde el dual en esa pata, en puntos porcentuales. '+
+  'Positivo = el dual rinde menos que el bono puro: es lo que estás pagando por quedarte con la mejor de las dos patas. "extrap." = la duration cae fuera del rango de la curva pura (referencia nomás). '+
+  'Implícitas de cada pata con la misma regla que las otras pestañas (curva TF a su duration).';
+function fitRange(tabId, x){
+  const f = state.fits[tabId] && state.fits[tabId].ALL; if(!f || !(x > 0)) return null;
+  return {v: (f.a + f.b*Math.log(x))/100, ext: x < f.xmin - 1/365 || x > f.xmax + 1/365};
+}
+function dualRows(){
+  const full = id => { const m = {}; (state.lastRowsFull[id] || []).forEach(r => m[r.t] = r); return m; };
+  const cer = full('cer'), dl = full('dl'), tam = full('tamar');
+  return (state.lastRows.dual || []).filter(r => !r.err).sort((a,b) => a.duration - b.duration).map(r => {
+    const isCer = r.grupo === 'CER/TAMAR', idxTab = isCer ? 'cer' : 'dl', ir = (isCer ? cer : dl)[r.t] || {}, tr = tam[r.t] || {};
+    const ci = fitRange(idxTab, r.duration), ct = fitRange('tamar', r.duration);
+    return {t:r.t, tipo:r.grupo, idxLab: isCer ? 'CER' : 'DL', teaIdx:r.teaIdx, curvaIdx: ci && ci.v, extIdx: ci && ci.ext,
+      costoIdx: (ci && r.teaIdx != null) ? (ci.v - r.teaIdx)*100 : null,
+      margen:r.margenTNA, curvaTam: ct && ct.v, extTam: ct && ct.ext, costoTam: (ct && r.margenTNA != null) ? (ct.v - r.margenTNA)*100 : null,
+      implIdx: isCer ? ir.inflBE : ir.devBE, tamarBE: tr.tamarBE};
+  });
+}
+function renderDualBox(head, body){
+  if(head) head.innerHTML = '<tr><th>Especie</th><th>Tipo</th><th>TEA pata CER/DL</th><th>Curva pura</th><th>Costo opción</th><th>Margen TAMAR</th><th>Curva TAMAR</th><th>Costo opción</th><th>Infl. / deval. impl.</th><th>TAMAR BE</th></tr>';
+  const ext = e => e ? ' <span class="small">extrap.</span>' : '';
+  const cost = (v, e) => v == null ? '<span class="rng">—</span>' : '<span class="'+(v>0?'neg':v<0?'pos':'')+'">'+pp(v)+'</span>'+ext(e);
+  body.innerHTML = dualRows().map(x => '<tr><td><b>'+x.t+'</b></td><td class="rng">'+x.tipo+'</td>'+
+    '<td>'+fmtPct(x.teaIdx,2)+'</td><td class="rng">'+fmtPct(x.curvaIdx,2)+'</td><td class="mainrate">'+cost(x.costoIdx, x.extIdx)+'</td>'+
+    '<td>'+fmtPct(x.margen,2)+'</td><td class="rng">'+fmtPct(x.curvaTam,2)+'</td><td class="mainrate">'+cost(x.costoTam, x.extTam)+'</td>'+
+    '<td>'+(x.implIdx==null ? '<span class="rng">—</span>' : fmtPct(x.implIdx,2)+' <span class="small">'+(x.idxLab==='CER'?'infl.':'deval.')+'</span>')+'</td><td>'+fmtPct(x.tamarBE,2)+'</td></tr>').join('')
+    || '<tr><td colspan="10" class="rng">Sin duales.</td></tr>';
+}
+
+/* ---- bloque de implícitas dentro de cada pestaña de instrumento ---- */
+function implBoxHtml(tab){
+  const f = IMPL_FAM.find(x => x.id === tab.id);
+  if(f) return '<div class="card implbox"><h3>'+f.tit+'</h3><div class="table-wrap"><table class="impl"><thead id="implxh-'+tab.id+'">'+implHeadHtml(f)+'</thead><tbody id="implx-'+f.id+'"></tbody></table></div><div class="note">'+IMPL_NOTE+'</div></div>';
+  if(tab.id === 'dual') return '<div class="card implbox"><h3>Costo de la opcionalidad · dual vs curvas puras</h3><div class="table-wrap"><table class="impl"><thead id="implxh-dual"></thead><tbody id="implx-dual"></tbody></table></div><div class="note">'+DUAL_NOTE+'</div></div>';
+  if(isSob(tab.id)) return '<div class="card implbox"><h3>Implícitas · spreads de TIR</h3><div class="table-wrap"><table class="impl"><thead id="implxh-'+tab.id+'">'+sobHead()+'</thead><tbody id="implx-'+tab.id+'"></tbody></table></div><div class="note">'+SOB_NOTE+'</div></div>';
+  return '';
+}
+function renderImplBox(tab){
+  const body = document.getElementById('implx-'+tab.id); if(!body) return;
+  const f = IMPL_FAM.find(x => x.id === tab.id);
+  const head = document.getElementById('implxh-'+tab.id);
+  if(f){ if(head) head.innerHTML = implHeadHtml(f); body.innerHTML = implBodyHtml(f, implRowsFor(f.id)); return; }
+  if(tab.id === 'dual'){ renderDualBox(head, body); return; }
+  if(head) head.innerHTML = sobHead();
+  if(isSob(tab.id)) renderSobImplInto(body, SOB_IMPL.filter(d => d.tabs.includes(tab.id)), tab.id);
+}
+
+/* ---- pestaña Implícitas: todas juntas para un paneo ---- */
 function addImplTab(){
   if(document.getElementById('panel-impl')) return;
   const el = document.createElement('div');
@@ -2425,21 +2691,15 @@ function addImplTab(){
   tabsRow.insertBefore(el, fwdTab || null);
   const panel = document.createElement('div');
   panel.className = 'panel'; panel.id = 'panel-impl';
-  panel.innerHTML = '<p class="panel-desc">Dos especies de distinto tipo con vencimiento parecido. Por defecto cada indexado se compara con la LECAP/BONCAP de vencimiento más cercano; podés elegir otra, la curva TF o una TEM manual. '+
-    'Bid = vendo el indexado al bid y compro TF al ask · Offer = compro el indexado al ask y vendo TF al bid. "Hoy" = cómo se movió la implícita en el día, con el último de las dos especies (se arma con el registro del tablero).</p>'+
-    '<div class="card" style="margin-bottom:12px"><h3 id="sobImplTit">Soberanos USD · spreads de TIR</h3><div class="table-wrap"><table class="impl"><thead><tr><th>Relación</th><th>Spread último</th><th>Compro A / vendo B</th><th>Vendo A / compro B</th><th>Mid</th><th>A · precio (bid / ask) · TIR</th><th>B · precio (bid / ask) · TIR</th></tr></thead><tbody id="implSob"></tbody></table></div>'+
-    '<div class="note">Spread = TIR de A − TIR de B (en B, promedio simple de las TIR de sus especies). Compro A / vendo B = A al ask y B al bid (spread más bajo); vendo A / compro B = A al bid y B al ask (el más alto). Click en una fila para ver el intradiario (banda bid–offer y mid, como el dólar). Canal D/C: el de las pestañas de Soberanos.</div></div>'+
-    IMPL_FAM.map(f => '<div class="card" style="margin-bottom:12px"><h3>'+f.tit+'</h3><div class="table-wrap"><table class="impl"><thead><tr><th>Especie</th><th>Vto</th><th>Comparable</th><th>TEM TF</th><th>'+f.lab+' (bid – offer)</th><th>Hoy</th>'+
-      (f.id==='tamar' ? '<th>TAMAR vigente</th><th>Dif. (pb)</th>' : '')+(f.id==='dl' ? '<th>Deval. mensual</th>' : '')+'</tr></thead><tbody id="impl-'+f.id+'"></tbody></table></div></div>').join('');
+  panel.innerHTML = '<p class="panel-desc">Todas las implícitas juntas (son las mismas que aparecen debajo de la tabla de cada pestaña). '+IMPL_NOTE+'</p>'+
+    IMPL_FAM.map(f => '<div class="card" style="margin-bottom:12px"><h3>'+f.tit+'</h3><div class="table-wrap"><table class="impl"><thead id="implh-'+f.id+'">'+implHeadHtml(f)+'</thead><tbody id="impl-'+f.id+'" data-fam="'+f.id+'"></tbody></table></div></div>').join('')+
+    '<div class="card" style="margin-bottom:12px"><h3>Soberanos USD · spreads de TIR</h3><div class="table-wrap"><table class="impl"><thead id="implSobH">'+sobHead()+'</thead><tbody id="implSob"></tbody></table></div><div class="note">'+SOB_NOTE+'</div></div>';
   document.getElementById('panels').appendChild(panel);
-  panel.addEventListener('click', (ev) => {
-    const tr = ev.target.closest && ev.target.closest('tr[data-sob]'); if(!tr) return;
-    state.sobImplOpen = state.sobImplOpen === tr.dataset.sob ? null : tr.dataset.sob; renderSobImpl();
-  });
+  panel.addEventListener('click', (ev) => onSobImplClick(ev, renderImpl));
   panel.addEventListener('change', (ev) => {
-    const elx = ev.target, t = elx.getAttribute && elx.getAttribute('data-comp'), fam = elx.closest && elx.closest('tbody') && elx.closest('tbody').id.replace('impl-','');
-    if(!t || !fam) return;
-    const cfg = getComp(fam, t);
+    const elx = ev.target, t = elx.getAttribute && elx.getAttribute('data-comp'), tb = elx.closest && elx.closest('tbody[data-fam]');
+    if(!t || !tb) return;
+    const fam = tb.dataset.fam, cfg = getComp(fam, t);
     if(elx.tagName === 'SELECT'){
       const v = elx.value;
       if(v === '__auto') setComp(fam, t, {mode:'auto'});
@@ -2450,95 +2710,13 @@ function addImplTab(){
     renderTable(TABS.find(x => x.id === fam)); renderImpl();
   });
 }
-// serie intradiaria de la implícita: último del indexado y de la TF comparable, minuto a minuto
-function implSeries(fam, r){
-  const cfg = r._cfg || {};
-  const A = ilogPx(r.t);
-  if(A.length < 2) return null;
-  const mesD = 365/12;
-  let temAt = null;
-  if((cfg.mode === 'auto' || cfg.mode === 'tk') && cfg.tk){
-    const B = ilogPx(cfg.tk), tfb = TF.find(x => x.t === cfg.tk);
-    if(!B.length || !tfb) return null;
-    const dias = daysBetween(parseISO(tfb.vto), state.fechaLiquidacion);
-    const mp = new Map(B.map(b => [b[0], b[1]]));
-    temAt = t => { const p = mp.get(t); return (p && dias > 0) ? Math.pow(tfb.pago/p, mesD/dias) - 1 : null; };
-  } else if(cfg.mode === 'manual' && cfg.tem != null){ temAt = () => cfg.tem; }
-  else return null;
-  const out = [];
-  for(const a of A){ const tem = temAt(a[0]); if(tem == null || !a[1]) continue; const v = beValue(fam, r, a[1], tem); if(v && v.v != null && isFinite(v.v)) out.push([a[0], v.v, null, null]); }
-  return out.length > 1 ? out : null;
-}
-const SOB_IMPL = [
-  {id:'ao27', lab:'AO27 vs prom. BOPREAL 2027', A:['AO27'], B:['BPA7','BPB7','BPC7','BPD7']},
-  {id:'ao28', lab:'AO28 vs prom. BOPREAL 2028', A:['AO28'], B:['BPA8','BPB8']},
-  {id:'al30bp', lab:'AL30 vs prom. BOPREAL 2028', A:['AL30'], B:['BPA8','BPB8']},
-  {id:'l29', lab:'Ley · AL29 vs GD29', A:['AL29'], B:['GD29']},
-  {id:'l30', lab:'Ley · AL30 vs GD30', A:['AL30'], B:['GD30']},
-  {id:'l35', lab:'Ley · AL35 vs GD35', A:['AL35'], B:['GD35']},
-  {id:'l38', lab:'Ley · AE38 vs GD38', A:['AE38'], B:['GD38']},
-  {id:'l41', lab:'Ley · AL41 vs GD41', A:['AL41'], B:['GD41']},
-];
-function sobTabFor(base){ const b = BONDS.find(x => x.base === base); return b ? TABS.find(t => t.id === ({BONARES:'sobAL', GLOBALES:'sobGD', BOPREAL:'sobBP'})[b.grupo]) : null; }
-function tirSob(base, precio){ const tab = sobTabFor(base); if(!tab || !precio) return null; const v = rateAt(tab, base, base + state.moneda, precio); return v == null ? null : v; }
-// precios (último / bid / ask) -> spread en pb; en B promedio simple de las TIR disponibles
-function sobSpread(def, getPx){
-  const avg = (list, side) => { const v = list.map(b => tirSob(b, getPx(b)[side])).filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null; };
-  const A = (side) => avg(def.A, side), B = (side) => avg(def.B, side);
-  const d = (a, b) => (a != null && b != null) ? (a - b)*1e4 : null;
-  const last = d(A('last'), B('last')), lo = d(A('ask'), B('bid')), hi = d(A('bid'), B('ask'));
-  return {last, lo, hi, mid: (lo != null && hi != null) ? (lo+hi)/2 : null};
-}
-function renderSobImpl(){
-  const body = document.getElementById('implSob'); if(!body) return;
-  document.getElementById('sobImplTit').textContent = 'Soberanos USD · spreads de TIR (canal '+state.moneda+')';
-  const pm = state.rawPM || {};
-  const q = b => { const o = pm[b + state.moneda] || {}; return {last:o.precio, bid:o.bid, ask:o.ask}; };
-  const pb = v => v == null ? '—' : (v>0?'+':'')+fmt(v,0)+' pb';
-  const ref = list => list.map(b => { const o = q(b), t = tirSob(b, o.last);
-    return '<div class="ref"><b>'+b+state.moneda+'</b> '+fmtP(o.last)+' <span class="rng">('+fmtP(o.bid)+' / '+fmtP(o.ask)+')</span> · '+fmtPct(t,2)+'</div>'; }).join('');
-  body.innerHTML = SOB_IMPL.map(def => {
-    const s = sobSpread(def, q);
-    let html = '<tr class="sobrow" data-sob="'+def.id+'" style="cursor:pointer"><td><b>'+def.lab+'</b></td><td class="mainrate">'+pb(s.last)+'</td><td>'+pb(s.lo)+'</td><td>'+pb(s.hi)+'</td><td>'+pb(s.mid)+'</td>'+
-      '<td style="text-align:left">'+ref(def.A)+'</td><td style="text-align:left">'+ref(def.B)+'</td></tr>';
-    if(state.sobImplOpen === def.id) html += '<tr class="detrow"><td colspan="7"><div id="sobImplChart"></div></td></tr>';
-    return html;
-  }).join('');
-  const def = SOB_IMPL.find(d => d.id === state.sobImplOpen);
-  if(def){
-    // serie minuto a minuto con las puntas de todas las especies del par
-    const keys = def.A.concat(def.B), series = {};
-    keys.forEach(b => series[b] = new Map(ilogPx(b + state.moneda).map(a => [a[0], a])));
-    const ts = [...(series[keys[0]] || new Map()).keys()].filter(t => keys.every(b => series[b].has(t))).sort((a,b) => a-b);
-    const pts = ts.map(t => { const s = sobSpread(def, b => { const a = series[b].get(t); return {last:a[1], bid:a[2], ask:a[3]}; }); return {x:t, y:s.last, lo:s.lo, hi:s.hi}; });
-    svgBand(document.getElementById('sobImplChart'), pts, {h:200, noLast:true, color:'#c084fc', fy: v => fmt(v,0)+' pb', ft: v => fmt(v,1)+' pb',
-      labels:{y:'Último', hi:'Vendo A / compro B', lo:'Compro A / vendo B'},
-      empty:'El intradiario se arma mientras el tablero está abierto (desde las 10:40), con el registro de todas las especies del par.'});
-  }
-}
 function renderImpl(){
   if(!document.getElementById('panel-impl')) return;
-  renderSobImpl();
+  const hs = document.getElementById('implSobH'); if(hs) hs.innerHTML = sobHead();
+  renderSobImplInto(document.getElementById('implSob'), SOB_IMPL, 'impl');
   for(const f of IMPL_FAM){
-    const body = document.getElementById('impl-'+f.id); if(!body) continue;
-    const tab = {id:f.id};
-    const rows = (state.lastRowsFull[f.id] || state.lastRows[f.id] || []).filter(r => !r.err).sort((a,b) => (a.duration||0) - (b.duration||0));
-    body.innerHTML = rows.map(r => {
-      const v = r[f.key], b = r[f.b], o = r[f.o];
-      const ser = implSeries(f.id, r);
-      let hoy = '<span class="rng">—</span>';
-      if(ser){
-        const d = ser[ser.length-1][1] - ser[0][1];
-        const dTxt = f.id === 'dl' ? (d>=0?'+':'')+fmt(d,2) : (d>=0?'+':'')+fmt(d*100,2)+'%';
-        hoy = '<div class="flowc">'+sparkSvg(ser, d>0?'var(--bad)':d<0?'var(--accent)':'var(--text-dim)')+'<span class="dlt '+(d>0?'dn':d<0?'up':'')+'">'+dTxt+'</span></div>';
-      }
-      return '<tr><td><b>'+r.t+'</b></td><td class="rng">'+(r.vto ? r.vto.split('-').reverse().join('/') : '')+'</td>'+
-        '<td class="ctrlcell">'+compSelectHtml(tab, r)+'</td><td class="ctrlcell">'+temTFHtml(tab, r)+'</td>'+
-        '<td>'+(v==null ? '<span class="rng">'+(r._temNote || '—')+'</span>' : '<b>'+f.fmtV(v)+'</b> <span class="rng">('+(b==null?'—':f.fmtV(b))+' – '+(o==null?'—':f.fmtV(o))+')</span>')+'</td>'+
-        '<td>'+hoy+'</td>'+
-        (f.id==='tamar' ? '<td>'+fmtPct(r.tamarVig,2)+'</td><td class="'+(r.tamarDif>0?'pos':r.tamarDif<0?'neg':'')+'">'+(r.tamarDif==null?'—':(r.tamarDif>0?'+':'')+fmt(r.tamarDif,0))+'</td>' : '')+
-        (f.id==='dl' ? '<td>'+fmtPct(r.devBE,2)+'</td>' : '')+'</tr>';
-    }).join('') || '<tr><td colspan="8" class="rng">Sin especies.</td></tr>';
+    const h = document.getElementById('implh-'+f.id); if(h) h.innerHTML = implHeadHtml(f);
+    const body = document.getElementById('impl-'+f.id); if(body) body.innerHTML = implBodyHtml(f, implRowsFor(f.id));
   }
 }
 
@@ -2600,7 +2778,7 @@ function renderRel(S, Lg){
   const f = FWD_FAM[state.fwd.fam], tab = TABS.find(t => t.id === f.tab);
   const kS = isSob(tab.id) ? S.t + monFor(S.t) : S.t, kL = isSob(tab.id) ? Lg.t + monFor(Lg.t) : Lg.t;
   const pm = state.rawPM || {}, qS = pm[kS] || {}, qL = pm[kL] || {};
-  const r = (t, k, p) => { const v = rateAt(tab, t, k, p); return v == null ? null : v*1e4; };
+  const r = (t, k, p) => { const v = rateAt(tab, t, k, p); return v == null ? null : v*100; };   // en %
   const dif = (a, b) => (a != null && b != null) ? a - b : null;
   const spNow = dif(r(Lg.t,kL,qL.precio), r(S.t,kS,qS.precio));
   const spLo = dif(r(Lg.t,kL,qL.ask), r(S.t,kS,qS.bid));      // compro la larga (ask) y vendo la corta (bid)
@@ -2614,7 +2792,7 @@ function renderRel(S, Lg){
     spPts.push({x:a[0], y: dif(r(Lg.t,kL,b[1]), r(S.t,kS,a[1])), lo: dif(r(Lg.t,kL,b[3]), r(S.t,kS,a[2])), hi: dif(r(Lg.t,kL,b[2]), r(S.t,kS,a[3]))});
     rtPts.push({x:a[0], y:(a[1]&&b[1]) ? a[1]/b[1] : null, lo:(a[2]&&b[3]) ? a[2]/b[3] : null, hi:(a[3]&&b[2]) ? a[3]/b[2] : null});
   }
-  const pb = v => v==null ? '—' : (v>0?'+':'')+fmt(v,0)+' pb';
+  const pb = v => pp(v);
   box.innerHTML = '<div class="fx3" style="grid-template-columns:1fr 1fr">'+
     '<div class="fxc"><h3>Spread de tasa · '+Lg.t+' − '+S.t+' ('+tab.curveLabel+')</h3><div class="bigv">'+pb(spNow)+'</div>'+
       '<div class="sub2"><span>Compro '+Lg.t+' / vendo '+S.t+' (puntas)</span><b>'+pb(spLo)+'</b></div>'+
@@ -2622,7 +2800,7 @@ function renderRel(S, Lg){
     '<div class="fxc"><h3>Ratio de precios · '+S.t+' / '+Lg.t+'</h3><div class="bigv">'+fmt(rtNow,4)+'</div>'+
       '<div class="sub2"><span>Vendo '+S.t+' (bid) / compro '+Lg.t+' (ask)</span><b>'+fmt(rtLo,4)+'</b></div>'+
       '<div class="sub2"><span>Compro '+S.t+' (ask) / vendo '+Lg.t+' (bid)</span><b>'+fmt(rtHi,4)+'</b></div><div id="relRt" style="margin-top:8px"></div></div></div>';
-  svgBand(document.getElementById('relSp'), spPts, {h:180, color:'#c084fc', fy: v => fmt(v,0)+' pb', ft: v => fmt(v,1)+' pb',
+  svgBand(document.getElementById('relSp'), spPts, {h:180, color:'#c084fc', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
     labels:{y:'Último', hi:'Compro corta / vendo larga', lo:'Compro larga / vendo corta'}, mid:false,
     empty:'El spread intradiario se arma mientras el tablero está abierto (necesita registro de las dos especies).'});
   svgBand(document.getElementById('relRt'), rtPts, {h:180, color:'#60a5fa', fy: v => fmt(v,4), ft: v => fmt(v,5),
