@@ -137,7 +137,7 @@ table.arbt{width:100%;font-family:var(--mono);font-size:11.5px;table-layout:fixe
 table.arbt td:first-child{text-align:left;color:var(--text-dim);font-size:11px;} table.arbt tr.dir td{font-weight:600;color:var(--text);}
 table.arbt .q{display:block;font-size:9.5px;color:var(--text-faint);font-weight:400;}
 table.arbt td.best{color:var(--text);} table.arbt td.arbhi{background:rgba(232,195,61,.16);color:var(--warn);font-weight:600;} table.arbt td.arbhi .q{color:var(--warn);}
-.arbe{font-size:10px;} .arbhi{color:var(--warn);} .arbx{margin-top:4px;font-family:var(--mono);font-size:10.5px;color:var(--warn);}
+.arbe{font-size:10px;} .arbhi{color:var(--warn);} .arbx{margin-top:6px;font-size:11.5px;line-height:1.45;color:var(--warn);background:rgba(232,195,61,.08);border-radius:4px;padding:6px 8px;}
 @media(max-width:700px){.arbgrid{grid-template-columns:1fr;} .arbcurs{grid-template-columns:1fr;}}
 .impltbl{margin-top:8px;} .impltbl summary{cursor:pointer;font-family:var(--mono);font-size:11.5px;color:var(--text-dim);padding:4px 0;}
 .implbox h3{display:flex;align-items:center;gap:10px;flex-wrap:wrap;} .implbox h3 .seg{text-transform:none;}
@@ -2633,7 +2633,7 @@ function barsSvg(host, items, o){
     const lines = [o.fv(x.v)];
     if(ok(x.bid) || ok(x.off)) lines.push('b '+(ok(x.bid)?o.fv(x.bid):'—'), 'o '+(ok(x.off)?o.fv(x.off):'—'));
     lines.forEach((t, j) => {
-      const y = x.v >= 0 ? top - 5 - j*11 : bot + 12 + j*11;
+      const y = Math.min(top, y0) - 5 - j*11;   // siempre arriba (en negativos, arriba de la línea de cero) para no pisar las etiquetas de abajo
       s += '<text x="'+cx+'" y="'+y+'" text-anchor="middle" font-size="'+(j?9:10.5)+'" fill="'+(j?'var(--text-dim)':'var(--text)')+'" font-family="var(--mono)">'+t+'</text>';
     });
     s += '<text transform="translate('+cx+','+(H-m.b+12)+') rotate(-35)" text-anchor="end" font-size="10.5" fill="'+(sel?'var(--text)':'var(--text-dim)')+'" font-family="var(--mono)">'+x.lab+'</text></g>';
@@ -2896,7 +2896,7 @@ function fwdSectionHtml(tab){
   return '<div class="card implbox" id="fwdsec-'+id+'"><h3>Forwards entre especies · vecinas '+segBtns('fwdmode', 'fwd', [['fwd','Forward'],['dif','Dif. de tasa']])+'</h3>'+
       buyLine('fwd')+'<div id="fwdbars-'+id+'"></div>'+
       '<div class="note">Una barra por tramo entre especies vecinas (consecutivas por duration). Forward = tasa implícita entre los dos vencimientos: ratio = (1+TEA larga)^D larga / (1+TEA corta)^D corta, pasada a '+(isSob(id)?'TIR (TEA)':'TEM')+'; bigote = FWD bid (acortar) – FWD offer (estirar). '+
-      'Dif. = '+tab.curveLabel+' larga − corta. Exacto en cero cupón; en soberanos y multicupón, aproximado por duration y con ≥ 60 días de diferencia. Click en una barra para ver el par abajo (con el forward en el día).</div></div>';
+      'Dif. = '+tab.curveLabel+' larga − corta (offer = compro la larga y vendo la corta → la más baja; bid = al revés). Exacto en cero cupón; en soberanos y multicupón, aproximado por duration y con ≥ 60 días de diferencia. Click en una barra para ver el par abajo (con el forward en el día).</div></div>';
 }
 const isMultiCup = t => CER_MULTICUPON.some(b => b.t === t);
 function parSectionHtml(tab){
@@ -2959,7 +2959,15 @@ function renderFwdTab(id){
     const k = a.t+'>'+b.t, lab = a.t+'→'+b.t;
     if(mode === 'fwd') items.push({k, lab, v:g(fl), bid:g(fb), off:g(fo), lo: fb && fo ? Math.min(g(fb), g(fo)) : null, hi: fb && fo ? Math.max(g(fb), g(fo)) : null,
       tip: lab+' · '+fl.dias+' días · '+(sob?'TIR':'TEM')+' fwd '+fmtPct(g(fl),2)+' (bid '+fmtPct(g(fb),2)+' / offer '+fmtPct(g(fo),2)+') · TEA fwd '+fmtPct(fl.tea,2)});
-    else { const d = (cur[b.t] != null && cur[a.t] != null) ? (cur[b.t] - cur[a.t])*100 : null; if(d != null) items.push({k, lab, v:d, tip: lab+' · '+tab.curveLabel+' '+fmtPct(cur[b.t],2)+' − '+fmtPct(cur[a.t],2)}); }
+    else {
+      const d = (cur[b.t] != null && cur[a.t] != null) ? (cur[b.t] - cur[a.t])*100 : null;
+      // con puntas: offer = compro la larga (ask) y vendo la corta (bid) → dif. más baja; bid = al revés → más alta
+      const kA = priceKeyFor(tab, a), kB = priceKeyFor(tab, b), rt = (t, k, p) => p ? rateAt(tab, t, k, p) : null;
+      const sub = (x, y) => (x != null && y != null) ? (x - y)*100 : null;
+      const dOff = sub(rt(b.t, kB, b.ask), rt(a.t, kA, a.bid)), dBid = sub(rt(b.t, kB, b.bid), rt(a.t, kA, a.ask));
+      if(d != null) items.push({k, lab, v:d, bid:dBid, off:dOff, lo: dOff != null && dBid != null ? Math.min(dOff, dBid) : null, hi: dOff != null && dBid != null ? Math.max(dOff, dBid) : null,
+        tip: lab+' · '+tab.curveLabel+' '+fmtPct(cur[b.t],2)+' − '+fmtPct(cur[a.t],2)+' · offer (compro larga / vendo corta) '+pp(dOff)+' · bid '+pp(dBid)});
+    }
   }
   barsSvg(document.getElementById('fwdbars-'+id), items, {
     fy: mode === 'fwd' ? (v => fmt(v*100,2)+'%') : (v => fmt(v,2)+'%'), fv: mode === 'fwd' ? (v => fmt(v*100,2)+'%') : (v => pp(v)),
@@ -3042,7 +3050,9 @@ function arbBond(base, pago){
     const routes = [];
     for(const [m] of ARB_CUR){
       const x = X[m];
-      if(m === c){ routes.push({m, direct:true, bid:x.bid, ask:x.ask, nb:x.qb, na:x.qa}); continue; }
+      const tk = k => base + k, fxN = (a, b) => { const d = a === '' ? b : a; return d === 'D' ? 'MEP' : 'CCL'; };
+      if(m === c){ routes.push({m, direct:true, bid:x.bid, ask:x.ask, nb:x.qb, na:x.qa,
+        legA: 'compro '+tk(c)+' al offer '+fmtP(x.ask), legB: 'vendo '+tk(c)+' al bid '+fmtP(x.bid)}); continue; }
       const fc = F[c], fm = F[m];
       // offer sintético: compro X en m (ask) pagando con c → necesito m: compro AL30 en c (ask) y vendo en m (bid)
       const ask = (x.ask && fc.ask && fm.bid) ? x.ask * fc.ask / fm.bid : null;
@@ -3050,7 +3060,23 @@ function arbBond(base, pago){
       // bid sintético: vendo X en m (bid) y paso m a c: compro AL30 en m (ask) y vendo en c (bid)
       const bid = (x.bid && fc.bid && fm.ask) ? x.bid * fc.bid / fm.ask : null;
       const capB = (x.qb != null && fc.qb != null && fm.qa != null && x.bid) ? Math.min(x.qb, Math.min(fm.qa, fc.qb) * fm.ask / x.bid) : x.qb;
-      routes.push({m, direct:false, bid, ask, nb: bid ? capB : null, na: ask ? capA : null});
+      const cn = k => k === '' ? '$' : k, fxA = (fm.bid && fc.ask) ? fm.bid/fc.ask : null, fxB = (fm.ask && fc.bid) ? fm.ask/fc.bid : null;
+      const fxLab = (c, m, side) => (c === '' || m === '') ? ((c === '' ? m : c) === 'D' ? 'MEP' : 'CCL')+' '+side : 'canje '+cn(m)+'/'+cn(c)+' '+side;
+      const tipA = ask ? 'Offer '+base+cn(m)+' '+fmtP(x.ask)+(m === '' ? ' ÷ ' : ' × ')+fmt(m === '' ? fxA : 1/fxA, 4)+' ('+fxLab(c, m, m === '' ? 'bid' : 'ask/bid')+': para comprar en '+cn(m)+' vendo '+cn(c)+') = '+fmtP(ask) : '';
+      const tipB = bid ? 'Bid '+base+cn(m)+' '+fmtP(x.bid)+(m === '' ? ' ÷ ' : ' × ')+fmt(m === '' ? fxB : 1/fxB, 4)+' ('+fxLab(c, m, m === '' ? 'offer' : 'bid/ask')+': vendo en '+cn(m)+' y vuelvo a '+cn(c)+') = '+fmtP(bid) : '';
+      let legA, legB;
+      if(m === ''){        // vía pesos: el FX es MEP o CCL (pesos por dólar)
+        legA = 'vendo '+fxN(c, m)+' al bid '+fmt(fxA,2)+' (vendo AL30'+c+' … compro AL30'+c+' al offer, vendo AL30 al bid) y compro '+tk('')+' en $ al offer '+fmtP(x.ask);
+        legB = 'vendo '+tk('')+' en $ al bid '+fmtP(x.bid)+' y compro '+fxN(c, m)+' al offer '+fmt(fxB,2)+' (compro AL30 al offer, vendo AL30'+c+' al bid)';
+        legA = legA.replace('(vendo AL30'+c+' … ', '(');
+      } else if(c === ''){ // moneda de pago pesos (no se usa hoy, por las dudas)
+        legA = 'compro '+fxN(c, m)+' y compro '+tk(m)+' al offer '+fmtP(x.ask);
+        legB = 'vendo '+tk(m)+' al bid '+fmtP(x.bid)+' y vendo '+fxN(c, m);
+      } else {             // entre D y C: canje con el AL30
+        legA = 'paso '+c+'→'+m+' con el canje (compro AL30'+c+' al offer, vendo AL30'+m+' al bid) y compro '+tk(m)+' al offer '+fmtP(x.ask);
+        legB = 'vendo '+tk(m)+' al bid '+fmtP(x.bid)+' y paso '+m+'→'+c+' con el canje (compro AL30'+m+' al offer, vendo AL30'+c+' al bid)';
+      }
+      routes.push({m, direct:false, bid, ask, nb: bid ? capB : null, na: ask ? capA : null, tipA, tipB, legA, legB});
     }
     if(routes.some(r => r.bid || r.ask)) any++;
     const d = routes.find(r => r.direct);
@@ -3104,15 +3130,17 @@ function renderArb(){
       const rows = C.routes.slice().sort((a,b) => b.direct - a.direct).map(r => {
         const hb = C.bestB === r && !r.direct && C.edgeB > mn, ha = C.bestA === r && !r.direct && C.edgeA > mn;
         return '<tr class="'+(r.direct ? 'dir' : '')+'"><td>'+via(r)+'</td>'+
-          '<td class="'+(hb ? 'arbhi' : (C.bestB === r ? 'best' : ''))+'">'+fmtP(r.bid)+'<span class="q">'+(hb ? '<b>+'+fmt(C.edgeB*100,2)+'%</b> · ' : '')+fmtN(r.nb)+'</span></td>'+
-          '<td class="'+(ha ? 'arbhi' : (C.bestA === r ? 'best' : ''))+'">'+fmtP(r.ask)+'<span class="q">'+(ha ? '<b>−'+fmt(C.edgeA*100,2)+'%</b> · ' : '')+fmtN(r.na)+'</span></td></tr>';
+          '<td title="'+(r.tipB||'')+'" class="'+(hb ? 'arbhi' : (C.bestB === r ? 'best' : ''))+'">'+fmtP(r.bid)+'<span class="q">'+(hb ? '<b>+'+fmt(C.edgeB*100,2)+'%</b> · ' : '')+fmtN(r.nb)+'</span></td>'+
+          '<td title="'+(r.tipA||'')+'" class="'+(ha ? 'arbhi' : (C.bestA === r ? 'best' : ''))+'">'+fmtP(r.ask)+'<span class="q">'+(ha ? '<b>−'+fmt(C.edgeA*100,2)+'%</b> · ' : '')+fmtN(r.na)+'</span></td></tr>';
       }).join('');
-      const cr = C.cross != null && C.cross > mn ? '<div class="arbx">Cruzado: compro '+via(C.bestA)+' a '+fmtP(C.bestA.ask)+' y vendo '+via(C.bestB)+' a '+fmtP(C.bestB.bid)+' → +'+fmt(C.cross*100,2)+'%</div>' : '';
-      return '<div class="arbcur"><div class="arbh">en '+lab+' (moneda de pago)</div><table class="arbt"><thead><tr><th></th><th>Bid</th><th>Offer</th></tr></thead><tbody>'+rows+'</tbody></table>'+cr+'</div>';
+      const cr = C.cross != null && C.cross > mn ? '<div class="arbx"><b>Arbitraje +'+fmt(C.cross*100,2)+'%</b><br>'+
+        '① Compra ('+via(C.bestA)+', offer '+fmtP(C.bestA.ask)+' en '+lab+'): '+C.bestA.legA+'<br>'+
+        '② Venta ('+via(C.bestB)+', bid '+fmtP(C.bestB.bid)+' en '+lab+'): '+C.bestB.legB+'</div>' : '';
+      return '<div class="arbcur"><div class="arbh">en '+lab+' (moneda de pago)</div><table class="arbt"><thead><tr><th></th><th title="Lo que te pagan si vendés">Bid · vendo</th><th title="Lo que pagás si comprás">Offer · compro</th></tr></thead><tbody>'+rows+'</tbody></table>'+cr+'</div>';
     }).join('');
     const xc = Object.values(x.cur).some(C => C.cross > mn);
     return '<div class="card arbcard'+(xc ? ' arbcross' : '')+'"><h3>'+x.base+' <span class="small" style="text-transform:none">'+x.grupo+'</span>'+
-      (x.maxEdge > mn ? '<span class="arbtag">'+(xc ? 'cruzado ' : 'mejora ')+'+'+fmt(x.maxEdge*100,2)+'%</span>' : '')+'</h3><div class="arbcurs">'+blocks+'</div></div>';
+      (x.maxEdge > mn ? '<span class="arbtag">'+(xc ? 'arbitraje +'+fmt(Math.max(...Object.values(x.cur).map(C => C.cross || 0))*100,2)+'%' : 'mejora +'+fmt(x.maxEdge*100,2)+'%')+'</span>' : '')+'</h3><div class="arbcurs">'+blocks+'</div></div>';
   }).join('') || '<div class="note">Ninguna especie con una mejora mayor a '+fmt(mn*100,2)+'%: el mejor bid y el mejor offer de cada moneda son los directos (o casi).</div>';
 }
 
