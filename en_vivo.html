@@ -65,7 +65,7 @@ tbody tr:hover{background:var(--bg2);}
 
 .err-row{color:var(--bad);font-size:12px;padding:10px;}
 
-.chart-wrap{margin-top:16px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;
+.chart-wrap{margin-top:16px;margin-bottom:12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;
   padding:14px;position:relative;}
 .chart-title{font-size:11.5px;color:var(--text-dim);font-family:var(--mono);margin:0 0 8px;}
 
@@ -127,6 +127,9 @@ tr.dimrow td{opacity:.35;}
 .ctrlcell .off{color:var(--text-faint);font-size:11px;}
 .spread{margin-top:14px;}
 .implbox{margin:12px 0 4px;}
+.impltbl{margin-top:8px;} .impltbl summary{cursor:pointer;font-family:var(--mono);font-size:11.5px;color:var(--text-dim);padding:4px 0;}
+.implbox h3{display:flex;align-items:center;gap:10px;flex-wrap:wrap;} .implbox h3 .seg{text-transform:none;}
+.fwdpar{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;} @media(max-width:1100px){.fwdpar{grid-template-columns:1fr;}}
 .secttl{font-family:var(--mono);font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 6px;display:flex;align-items:center;gap:8px;}
 .secnote{font-family:var(--mono);font-size:11px;color:var(--text-faint);margin:-4px 0 12px;}
 .implbox .note{max-width:1100px;}
@@ -961,7 +964,7 @@ function renderTabs(){
     const pxSeg = '<div class="pxbar">Precio: <span class="seg" id="pxseg-'+tab.id+'"><button data-px="last" class="on">Último</button><button data-px="bid">Bid</button><button data-px="ask">Offer</button><button data-px="mid">Mid</button></span>'+
       ' <a href="#" id="pxreset-'+tab.id+'">restaurar precios editados</a> <span class="small" id="pxinfo-'+tab.id+'"></span>'+
       '<span style="margin-left:auto">Intradiario en: <span class="seg" id="iunit-'+tab.id+'"><button data-u="px" class="on">Precio</button><button data-u="tasa">Tasa</button></span></span></div>';
-    panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p>'+segHtml+pxSeg+'<div class="alerts" id="alerts-'+tab.id+'"></div>'+toggleBtn+'<div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>'+
+    panel.innerHTML = '<p class="panel-desc">'+tab.desc+'</p>'+segHtml+pxSeg+
       '<div class="chart-wrap"><p class="chart-title">'+tab.curveLabel+' vs Duration</p>'+
       '<div class="chart-ctrl">'+
         '<label>Monto mínimo <input type="range" min="0" max="'+(VOL_STEPS[volUnit(tab.id)].length-1)+'" step="1" value="0" id="minvol-'+tab.id+'"> <b id="minvolLbl-'+tab.id+'">todas</b></label>'+
@@ -974,6 +977,7 @@ function renderTabs(){
         '<input id="calcRate-'+tab.id+'" placeholder="tasa"> % <span class="small">'+tab.curveLabel+'</span>'+
         '<span id="calcRef-'+tab.id+'"></span><span class="out" id="calcOut-'+tab.id+'"></span></div>'+
       '<div id="chart-'+tab.id+'"></div></div>'+
+      '<div class="alerts" id="alerts-'+tab.id+'"></div>'+toggleBtn+'<div class="table-wrap"><table><thead><tr id="head-'+tab.id+'"></tr></thead><tbody id="body-'+tab.id+'"></tbody></table></div>'+
       fwdSectionHtml(tab)+implBoxHtml(tab)+parSectionHtml(tab);
     panels.appendChild(panel);
     wireFwd(tab, panel);
@@ -1384,14 +1388,15 @@ const TAB_GRUPO = {sobGD:'GLOBALES', sobAL:'BONARES', sobBP:'BOPREAL'};
 function monFor(base){ const b = BONDS.find(x => x.base === base); return (b && state.monedaG[b.grupo]) || state.moneda; }
 function priceKeyFor(tab, row){ return isSob(tab.id) ? (row.ticker || (row.t + monFor(row.t))) : row.t; }
 const RATE_CACHE = new Map();
-function rateAt(tab, t, key, precio){
+function rateAt(tab, t, key, precio, field){
   if(!precio) return null;
-  const ck = tab.id+'|'+key+'|'+precio+'|'+(state.fechaLiquidacion ? state.fechaLiquidacion.getTime() : 0)+(tab.id==='dl' ? '|'+parseA3500() : '');
+  const fld = field || tab.curveKey;
+  const ck = tab.id+'|'+fld+'|'+key+'|'+precio+'|'+(state.fechaLiquidacion ? state.fechaLiquidacion.getTime() : 0)+(tab.id==='dl' ? '|'+parseA3500() : '');
   if(RATE_CACHE.has(ck)) return RATE_CACHE.get(ck);
   const pm = state.rawPM || state.priceMap, saved = state.priceMap, orig = pm[key];
   pm[key] = Object.assign({}, orig || {}, {precio}); state.priceMap = pm;
   let v = null;
-  try{ const r = tab.calc().find(x => x.t === t); v = r && !r.err ? r[tab.curveKey] : null; if(v != null && !isFinite(v)) v = null; }
+  try{ const r = tab.calc().find(x => x.t === t); v = r && !r.err ? r[fld] : null; if(v != null && !isFinite(v)) v = null; }
   finally{ if(orig) pm[key] = orig; else delete pm[key]; state.priceMap = saved; }
   if(RATE_CACHE.size > 30000) RATE_CACHE.clear();
   RATE_CACHE.set(ck, v);
@@ -2567,6 +2572,44 @@ function prevImplMap(famId){
 }
 const prevLbl = () => state.prev ? state.prev.date.split('-').reverse().slice(0,2).join('/') : '';
 
+/* ---- gráfico de barras (formato del Histórico): una barra por especie / tramo, bigote = bid–offer, raya = rueda anterior ---- */
+// items: {k, lab, v, lo, hi, prev, faded, color, tip, gapBefore}
+function barsSvg(host, items, o){
+  if(!host) return;
+  const ok = v => v != null && isFinite(v);
+  const I = items.filter(x => ok(x.v));
+  if(!I.length){ host.innerHTML = '<p class="sub" style="padding:8px 0">'+(o.empty || 'Sin datos.')+'</p>'; return; }
+  const W = Math.max(340, host.clientWidth || 760), H = o.h || 240, m = {l:54, r:10, t:22, b:o.mb || 62};
+  const vals = [0]; I.forEach(x => [x.v, x.lo, x.hi, x.prev].forEach(v => ok(v) && vals.push(v))); if(ok(o.ref)) vals.push(o.ref);
+  let ylo = Math.min(...vals), yhi = Math.max(...vals); const pad = (yhi-ylo)*0.14 || 1e-6; yhi += pad; if(ylo < 0) ylo -= pad;
+  const Y = v => H-m.b - (v-ylo)/(yhi-ylo)*(H-m.t-m.b);
+  const nGaps = I.filter((x,i) => i && x.gapBefore).length, slots = I.length + nGaps*0.8;
+  const sw = (W-m.l-m.r)/slots, bw = Math.min(48, sw*0.62);
+  let s = '<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="display:block;overflow:visible">';
+  for(let j=0;j<=4;j++){ const v = ylo+(yhi-ylo)*j/4, y = Y(v);
+    s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y+'" y2="'+y+'" stroke="var(--line)" stroke-width=".5"/><text x="'+(m.l-6)+'" y="'+(y+3.5)+'" text-anchor="end" font-size="10" fill="var(--text-dim)">'+o.fy(v)+'</text>'; }
+  s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+Y(0)+'" y2="'+Y(0)+'" stroke="var(--text-faint)" stroke-width="1"/>';
+  if(ok(o.ref)) s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+Y(o.ref)+'" y2="'+Y(o.ref)+'" stroke="var(--warn)" stroke-dasharray="4 3"/><text x="'+(W-m.r)+'" y="'+(Y(o.ref)-4)+'" text-anchor="end" font-size="10" fill="var(--warn)">'+(o.refLabel||'')+' '+o.fy(o.ref)+'</text>';
+  let slot = 0;
+  I.forEach((x, i) => {
+    if(i && x.gapBefore) slot += 0.8;
+    const cx = m.l + (slot + 0.5)*sw; slot++;
+    const c = x.color || o.color || 'var(--accent)', y0 = Y(0), y1 = Y(x.v), sel = o.sel && o.sel === x.k;
+    s += '<g data-k="'+x.k+'" style="cursor:'+(o.onClick?'pointer':'default')+'"><title>'+(x.tip || (x.lab+': '+o.fv(x.v)))+'</title>'+
+      '<rect x="'+(cx-sw/2)+'" y="'+m.t+'" width="'+sw+'" height="'+(H-m.t-m.b)+'" fill="'+(sel?'var(--bg3)':'transparent')+'"/>'+
+      '<rect x="'+(cx-bw/2).toFixed(1)+'" y="'+Math.min(y0,y1).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(1, Math.abs(y1-y0)).toFixed(1)+'" rx="2" fill="'+c+'" opacity="'+(x.faded?0.38:0.9)+'"/>';
+    if(ok(x.lo) && ok(x.hi)){ const a = Y(x.lo), b = Y(x.hi);
+      s += '<line x1="'+cx+'" x2="'+cx+'" y1="'+a+'" y2="'+b+'" stroke="var(--text)" stroke-width="1" opacity=".7"/><line x1="'+(cx-4)+'" x2="'+(cx+4)+'" y1="'+a+'" y2="'+a+'" stroke="var(--text)" opacity=".7"/><line x1="'+(cx-4)+'" x2="'+(cx+4)+'" y1="'+b+'" y2="'+b+'" stroke="var(--text)" opacity=".7"/>'; }
+    if(ok(x.prev)) s += '<line x1="'+(cx-bw/2-3)+'" x2="'+(cx+bw/2+3)+'" y1="'+Y(x.prev)+'" y2="'+Y(x.prev)+'" stroke="var(--text)" stroke-width="2" stroke-dasharray="3 2"/>';
+    const top = Math.min(y1, ok(x.hi) ? Y(x.hi) : y1, ok(x.lo) ? Y(x.lo) : y1), bot = Math.max(y1, ok(x.hi) ? Y(x.hi) : y1, ok(x.lo) ? Y(x.lo) : y1);
+    s += '<text x="'+cx+'" y="'+(x.v >= 0 ? top-5 : bot+12)+'" text-anchor="middle" font-size="10.5" fill="var(--text)" font-family="var(--mono)">'+o.fv(x.v)+'</text>';
+    s += '<text transform="translate('+cx+','+(H-m.b+12)+') rotate(-35)" text-anchor="end" font-size="10.5" fill="'+(sel?'var(--text)':'var(--text-dim)')+'" font-family="var(--mono)">'+x.lab+'</text></g>';
+  });
+  host.innerHTML = s + '</svg>';
+  host.onclick = o.onClick ? (e) => { const g = e.target.closest && e.target.closest('[data-k]'); if(g) o.onClick(g.dataset.k); } : null;
+}
+const segBtns = (cls, cur, opts) => '<span class="seg '+cls+'">'+opts.map(([v,l]) => '<button data-v="'+v+'"'+(v===cur?' class="on"':'')+'>'+l+'</button>').join('')+'</span>';
+
 /* ---- Soberanos: spreads de TIR entre especies (en %). Mismo canal para las dos patas. ---- */
 const SOB_IMPL = [
   {id:'ao27', lab:'AO27 vs prom. BOPREAL 2027', A:['AO27'], B:['BPA7','BPB7','BPC7','BPD7'], tabs:['sobAL','sobBP']},
@@ -2600,20 +2643,19 @@ function sanePx(o){ o = o || {}; const L = o.precio, ok = v => v && (!L || Math.
 const sobHead = () => '<tr><th>Relación</th><th>Spread TIR</th>'+(state.prev ? '<th>Δ vs '+prevLbl()+'</th>' : '')+'<th>Compro A / vendo B</th><th>Vendo A / compro B</th><th>A · precio (bid / ask) · TIR</th><th>B · precio (bid / ask) · TIR</th></tr>';
 const SOB_NOTE = 'Spread = TIR de A − TIR de B, en puntos porcentuales (en B, promedio simple de sus TIR). Compro A / vendo B = A al ask y B al bid; vendo A / compro B = A al bid y B al ask. Las dos patas con el mismo canal. Click en una fila para ver el intradiario.';
 function renderSobImplInto(body, defs, cont){
-  if(!body) return;
-  const pm = state.rawPM || {};
+  if(!body) return [];
+  const pm = state.rawPM || {}, out = [];
   body.innerHTML = defs.map(def => {
     const ch = sobCanal(def);
     const q = b => sanePx(pm[b + ch]);
     const s = sobSpread(def, q, ch);
     const ref = list => list.map(b => { const o = q(b), t = tirSob(b, o.last, ch);
       return '<div class="ref"><b>'+b+ch+'</b> '+fmtP(o.last)+' <span class="rng">('+fmtP(o.bid)+' / '+fmtP(o.ask)+')</span> · '+fmtPct(t,2)+'</div>'; }).join('');
-    const open = state.sobImplOpen === cont+':'+def.id;
     const sp = state.prev ? withPrev(pm0 => sobSpread(def, b => ({last: pm0[b + ch] && pm0[b + ch].precio}), ch)) : null;
     const dTd = state.prev ? '<td>'+((sp && sp.last != null && s.last != null) ? pp(s.last - sp.last) : '<span class="rng">—</span>')+'</td>' : '';
+    out.push({k:def.id, lab:def.lab.replace('Ley · ','').replace(' vs prom. ',' vs ').replace('BOPREAL ','BP '), v:s.last, lo:s.lo, hi:s.hi, prev: sp && sp.last, ch});
     let html = '<tr class="sobrow" data-sob="'+cont+':'+def.id+'" style="cursor:pointer"><td><b>'+def.lab+'</b> <span class="small">'+ch+'</span></td><td class="mainrate">'+pp(s.last)+'</td>'+dTd+'<td>'+pp(s.lo)+'</td><td>'+pp(s.hi)+'</td>'+
       '<td style="text-align:left">'+ref(def.A)+'</td><td style="text-align:left">'+ref(def.B)+'</td></tr>';
-    if(open) html += '<tr class="detrow"><td colspan="7"><div id="sobImplChart-'+cont+'"></div></td></tr>';
     return html;
   }).join('');
   const def = defs.find(d => state.sobImplOpen === cont+':'+d.id);
@@ -2622,10 +2664,13 @@ function renderSobImplInto(body, defs, cont){
     keys.forEach(b => series[b] = new Map(ilogPx(b + ch).map(a => [a[0], a])));
     const ts = [...(series[keys[0]] || new Map()).keys()].filter(t => keys.every(b => series[b].has(t))).sort((a,b) => a-b);
     const pts = ts.map(t => { const s = sobSpread(def, b => { const a = series[b].get(t); return {last:a[1], bid:a[2], ask:a[3]}; }, ch); return {x:t, y:s.last, lo:s.lo, hi:s.hi}; });
-    svgBand(document.getElementById('sobImplChart-'+cont), pts, {h:200, noLast:true, color:'#c084fc', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
+    const host = document.getElementById('implchart-'+cont);
+    if(host) host.innerHTML = '<p class="chart-title" style="margin-top:10px">'+def.lab+' · spread en el día</p><div></div>';
+    svgBand(host && host.lastChild, pts, {h:200, noLast:true, color:'#c084fc', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
       labels:{y:'Último', hi:'Vendo A / compro B', lo:'Compro A / vendo B'},
       empty:'El intradiario se arma mientras el tablero está abierto (desde las 10:40), con el registro de todas las especies del par.'});
-  }
+  } else { const host = document.getElementById('implchart-'+cont); if(host) host.innerHTML = ''; }
+  return out;
 }
 function onSobImplClick(ev, rerender){
   const tr = ev.target.closest && ev.target.closest('tr[data-sob]'); if(!tr) return false;
@@ -2664,21 +2709,59 @@ function renderDualBox(head, body){
 }
 
 /* ---- bloque de implícitas dentro de cada pestaña de instrumento ---- */
+state.implSel = {};
+const tblWrap = (id, head, note) => '<details class="impltbl"><summary>Ver tabla'+(id==='dual' ? '' : ' (y elegir comparable)')+'</summary><div class="table-wrap"><table class="impl"><thead id="implxh-'+id+'">'+head+'</thead><tbody id="implx-'+id+'"></tbody></table></div></details><div class="note">'+note+'</div>';
 function implBoxHtml(tab){
-  const f = IMPL_FAM.find(x => x.id === tab.id);
-  if(f) return '<div class="card implbox implmain"><h3>'+f.tit+'</h3><div class="table-wrap"><table class="impl"><thead id="implxh-'+tab.id+'">'+implHeadHtml(f)+'</thead><tbody id="implx-'+f.id+'"></tbody></table></div><div class="note">'+IMPL_NOTE+'</div></div>';
-  if(tab.id === 'dual') return '<div class="card implbox implmain"><h3>Costo de la opcionalidad · dual vs curvas puras</h3><div class="table-wrap"><table class="impl"><thead id="implxh-dual"></thead><tbody id="implx-dual"></tbody></table></div><div class="note">'+DUAL_NOTE+'</div></div>';
-  if(isSob(tab.id)) return '<div class="card implbox implmain"><h3>Implícitas · spreads de TIR</h3><div class="table-wrap"><table class="impl"><thead id="implxh-'+tab.id+'">'+sobHead()+'</thead><tbody id="implx-'+tab.id+'"></tbody></table></div><div class="note">'+SOB_NOTE+'</div></div>';
+  const f = IMPL_FAM.find(x => x.id === tab.id), id = tab.id;
+  const bars = '<div id="implbars-'+id+'"></div><div id="implchart-'+id+'"></div>';
+  if(f) return '<div class="card implbox implmain"><h3>'+f.tit+' <span class="small" style="text-transform:none">· click en una barra para verla en el día</span></h3>'+bars+tblWrap(id, implHeadHtml(f), 'Barra = implícita con el último · bigote = bid – offer · raya punteada = rueda anterior (si cargaste el CSV)'+(id==='tamar' ? ' · línea amarilla = TAMAR vigente' : '')+'. '+IMPL_NOTE)+'</div>';
+  if(id === 'dual') return '<div class="card implbox implmain"><h3>Costo de la opcionalidad · dual vs curvas puras</h3>'+bars+tblWrap(id, '', 'Azul = pata TAMAR · naranja = pata CER · violeta = pata DL · más apagado = extrapolado. '+DUAL_NOTE)+'</div>';
+  if(isSob(id)) return '<div class="card implbox implmain"><h3>Implícitas · spreads de TIR <span class="small" style="text-transform:none">· click en una barra para verla en el día</span></h3>'+bars+tblWrap(id, sobHead(), 'Barra = spread con el último · bigote = puntas · raya punteada = rueda anterior. '+SOB_NOTE)+'</div>';
   return '';
 }
 function renderImplBox(tab){
-  const body = document.getElementById('implx-'+tab.id); if(!body) return;
-  const f = IMPL_FAM.find(x => x.id === tab.id);
-  const head = document.getElementById('implxh-'+tab.id);
-  if(f){ if(head) head.innerHTML = implHeadHtml(f); body.innerHTML = implBodyHtml(f, implRowsFor(f.id)); return; }
-  if(tab.id === 'dual'){ renderDualBox(head, body); return; }
+  const id = tab.id, body = document.getElementById('implx-'+id); if(!body) return;
+  const f = IMPL_FAM.find(x => x.id === id), head = document.getElementById('implxh-'+id), host = document.getElementById('implbars-'+id);
+  if(f){
+    if(head) head.innerHTML = implHeadHtml(f);
+    const rows = implRowsFor(f.id), pv = prevImplMap(f.id);
+    body.innerHTML = implBodyHtml(f, rows);
+    const items = rows.filter(r => r[f.key] != null).map(r => { const b = r[f.b], o = r[f.o];
+      return {k:r.t, lab:r.t, v:r[f.key], lo: b != null && o != null ? Math.min(b,o) : null, hi: b != null && o != null ? Math.max(b,o) : null, prev: pv && pv[r.t],
+        tip: r.t+' · '+f.lab+' '+fmtPct(r[f.key],2)+' (bid '+fmtPct(b,2)+' / offer '+fmtPct(o,2)+')'+(pv && pv[r.t] != null ? ' · rueda ant. '+fmtPct(pv[r.t],2) : '')}; });
+    const vig = id === 'tamar' ? (rows.find(r => r.tamarVig != null) || {}).tamarVig : null;
+    const sel = state.implSel[id] && items.some(x => x.k === state.implSel[id]) ? state.implSel[id] : null;
+    barsSvg(host, items, {fy: v => fmt(v*100,2)+'%', fv: v => fmt(v*100,2)+'%', color:'#2f9e7a', ref: vig, refLabel:'TAMAR vigente', sel,
+      empty: 'Sin implícitas: '+(rows[0] && rows[0]._temNote || 'faltan datos'), onClick: k => { state.implSel[id] = state.implSel[id] === k ? null : k; renderImplBox(tab); }});
+    const ch = document.getElementById('implchart-'+id);
+    if(ch){
+      const r = sel && rows.find(x => x.t === sel);
+      if(!r) ch.innerHTML = '';
+      else {
+        ch.innerHTML = '<p class="chart-title" style="margin-top:10px">'+r.t+' · '+f.lab+' en el día</p><div></div>';
+        const ser = implSeries(f.id, r, f.key === 'devBE') || [];
+        svgBand(ch.lastChild, ser.map(a => ({x:a[0], y:a[1]})), {h:180, color:'#2f9e7a', fy: v => fmt(v*100,2)+'%', ft: v => fmt(v*100,3)+'%', labels:{y:f.lab}, mid:false,
+          empty:'Se arma mientras el tablero está abierto (desde las 10:40), con el registro del indexado y de la curva TF.'});
+      }
+    }
+    return;
+  }
+  if(id === 'dual'){
+    renderDualBox(head, body);
+    const rows = dualRows(), items = [];
+    rows.forEach((x, i) => items.push({k:'T'+x.t, lab:x.t+' TAMAR', v:x.costoTam, faded:x.extTam, color:'#5b8def', tip:x.t+' pata TAMAR: margen '+fmtPct(x.margen,2)+' vs curva '+fmtPct(x.curvaTam,2)+(x.extTam?' (extrap.)':'')}));
+    rows.forEach((x, i) => items.push({k:'I'+x.t, lab:x.t+' '+x.idxLab, v:x.costoIdx, faded:x.extIdx, gapBefore: i === 0, color: x.idxLab === 'CER' ? '#e0844a' : '#a46cd6', tip:x.t+' pata '+x.idxLab+': TEA '+fmtPct(x.teaIdx,2)+' vs curva '+fmtPct(x.curvaIdx,2)+(x.extIdx?' (extrap.)':'')}));
+    items.forEach(x => { if(x.v == null) x.v = null; });
+    barsSvg(host, items, {fy: v => fmt(v,1)+'%', fv: v => pp(v), h:260, mb:78, empty:'Sin duales.'});
+    return;
+  }
   if(head) head.innerHTML = sobHead();
-  if(isSob(tab.id)) renderSobImplInto(body, SOB_IMPL.filter(d => d.tabs.includes(tab.id)), tab.id);
+  if(isSob(id)){
+    const list = renderSobImplInto(body, SOB_IMPL.filter(d => d.tabs.includes(id)), id);
+    const sel = state.sobImplOpen && state.sobImplOpen.startsWith(id+':') ? state.sobImplOpen.slice(id.length+1) : null;
+    barsSvg(host, list.map(x => Object.assign({}, x, {lab: x.lab+' '+x.ch, tip: x.lab+' ('+x.ch+'): '+pp(x.v)+' · puntas '+pp(x.lo)+' / '+pp(x.hi)+(x.prev != null ? ' · rueda ant. '+pp(x.prev) : '')})),
+      {fy: v => fmt(v,2)+'%', fv: v => pp(v), color:'#c084fc', sel, mb:80, onClick: k => { state.sobImplOpen = state.sobImplOpen === id+':'+k ? null : id+':'+k; renderImplBox(tab); }});
+  }
 }
 
 /* ---- pestaña Implícitas: todas juntas para un paneo ---- */
@@ -2773,14 +2856,16 @@ function fwdRate(s, l){
 const legLabel = x => x.t + (x.vto ? ' ('+x.vto.split('-').reverse().join('/')+')' : ' (dur '+fmt(x.D,2)+')');
 
 /* ---- dentro de cada pestaña, debajo de la curva: Forwards entre especies · Implícitas · Par de especies (como el Histórico) ---- */
+state.fwdMode = {};
 function fwdSectionHtml(tab){
   if(!FWD_FAM[tab.id]) return '';
   const id = tab.id;
-  return '<div class="card implbox" id="fwdsec-'+id+'"><h3>Forwards entre especies · tramos consecutivos</h3>'+
-      '<div class="table-wrap"><table class="impl"><thead><tr><th>Tramo</th><th>Desde</th><th>Hasta</th><th>Días</th><th>TEM fwd</th><th>FWD bid</th><th>FWD offer</th><th>TEA fwd</th></tr></thead><tbody id="fwdChain-'+id+'"></tbody></table></div>'+
-      '<div class="note">Forward entre cada especie y la siguiente que vence al menos 30 días después (último operado). FWD bid = acortar (compro la corta al ask, vendo la larga al bid) · FWD offer = estirar (compro la larga al ask, vendo la corta al bid). '+
-      'Exacto en cero cupón; en soberanos y multicupón, aproximado por duration (y pide ≥ 60 días de diferencia). Click en un tramo para verlo abajo en Par de especies.</div></div>';
+  return '<div class="card implbox" id="fwdsec-'+id+'"><h3>Forwards entre especies · vecinas '+segBtns('fwdmode', 'fwd', [['fwd','Forward'],['dif','Dif. de tasa']])+'</h3>'+
+      '<div id="fwdbars-'+id+'"></div>'+
+      '<div class="note">Una barra por tramo entre especies vecinas (consecutivas por duration). Forward = tasa implícita entre los dos vencimientos: ratio = (1+TEA larga)^D larga / (1+TEA corta)^D corta, pasada a '+(isSob(id)?'TIR (TEA)':'TEM')+'; bigote = FWD bid (acortar) – FWD offer (estirar). '+
+      'Dif. = '+tab.curveLabel+' larga − corta. Exacto en cero cupón; en soberanos y multicupón, aproximado por duration y con ≥ 60 días de diferencia. Click en una barra para ver el par abajo (con el forward en el día).</div></div>';
 }
+const isMultiCup = t => CER_MULTICUPON.some(b => b.t === t);
 function parSectionHtml(tab){
   if(!FWD_FAM[tab.id]) return '';
   const id = tab.id;
@@ -2795,11 +2880,9 @@ function wireFwd(tab, panel){
   state.fwdT[id] = state.fwdT[id] || {s:'', l:''};
   panel.querySelector('#fwdS-'+id).onchange = (e) => { state.fwdT[id].s = e.target.value; renderFwdTab(id); };
   panel.querySelector('#fwdL-'+id).onchange = (e) => { state.fwdT[id].l = e.target.value; renderFwdTab(id); };
-  panel.querySelector('#fwdChain-'+id).onclick = (e) => {
-    const tr = e.target.closest && e.target.closest('tr[data-s]'); if(!tr) return;
-    state.fwdT[id].s = tr.dataset.s; state.fwdT[id].l = tr.dataset.l; renderFwdTab(id);
-    const ps = document.getElementById('parsec-'+id); if(ps) ps.scrollIntoView({behavior:'smooth', block:'start'});
-  };
+  panel.querySelectorAll('#fwdsec-'+id+' .fwdmode button').forEach(b => b.onclick = () => {
+    state.fwdMode[id] = b.dataset.v; panel.querySelectorAll('#fwdsec-'+id+' .fwdmode button').forEach(x => x.classList.toggle('on', x === b)); renderFwdTab(id);
+  });
 }
 function renderFwdTab(id){
   const body = document.getElementById('fwdBody-'+id); if(!body) return;
@@ -2829,19 +2912,26 @@ function renderFwdTab(id){
       return '<tr><td>'+lab+'</td><td>'+px(a && a.p)+'</td><td>'+px(b && b.p)+'</td>'+
       '<td class="mainrate">'+pc(f && f.tem)+'</td><td>'+pc(f && f.tna)+'</td><td>'+pc(f && f.tea)+'</td></tr>'; }).join('');
   }
-  const chain = document.getElementById('fwdChain-'+id);
-  let rowsH = '';
+  // barras de tramos vecinos
+  const sob = isSob(id), mode = state.fwdMode[id] || 'fwd', tab = TABS.find(t => t.id === id);
+  const cur = {}; (state.lastRows[id] || []).forEach(r => cur[r.t] = r[tab.curveKey]);
+  const items = [];
   for(let i=0;i<legs.length-1;i++){
-    const a = legs[i], b = legs.slice(i+1).find(x => x.D - a.D >= Math.max(span, 30/365));   // tramos de menos de 30 días dan forwards sin sentido
+    const a = legs[i], need = (sob || isMultiCup(a.t)) ? 60/365 : 1/365;
+    const b = legs.slice(i+1).find(x => x.D - a.D >= ((sob || isMultiCup(a.t) || isMultiCup(x.t)) ? 60/365 : need));
     if(!b) continue;
     const fl = fwdRate(a.yl, b.yl), fb = fwdRate(a.ya, b.yb), fo = fwdRate(a.yb, b.ya);
     if(!fl) continue;
-    const on = (a.t===st.s && b.t===st.l) ? 'background:var(--bg3);' : '';
-    rowsH += '<tr data-s="'+a.t+'" data-l="'+b.t+'" style="cursor:pointer;'+on+'"><td><b>'+a.t+' → '+b.t+'</b></td>'+
-      '<td class="rng">'+(a.vto ? a.vto.split('-').reverse().join('/') : 'dur '+fmt(a.D,2))+'</td><td class="rng">'+(b.vto ? b.vto.split('-').reverse().join('/') : 'dur '+fmt(b.D,2))+'</td><td>'+fl.dias+'</td>'+
-      '<td class="mainrate">'+pc(fl.tem)+'</td><td>'+pc(fb && fb.tem)+'</td><td>'+pc(fo && fo.tem)+'</td><td>'+pc(fl.tea)+'</td></tr>';
+    const g = f => f ? (sob ? f.tea : f.tem) : null;
+    const k = a.t+'>'+b.t, lab = a.t+'→'+b.t;
+    if(mode === 'fwd') items.push({k, lab, v:g(fl), lo: fb && fo ? Math.min(g(fb), g(fo)) : null, hi: fb && fo ? Math.max(g(fb), g(fo)) : null,
+      tip: lab+' · '+fl.dias+' días · '+(sob?'TIR':'TEM')+' fwd '+fmtPct(g(fl),2)+' (bid '+fmtPct(g(fb),2)+' / offer '+fmtPct(g(fo),2)+') · TEA fwd '+fmtPct(fl.tea,2)});
+    else { const d = (cur[b.t] != null && cur[a.t] != null) ? (cur[b.t] - cur[a.t])*100 : null; if(d != null) items.push({k, lab, v:d, tip: lab+' · '+tab.curveLabel+' '+fmtPct(cur[b.t],2)+' − '+fmtPct(cur[a.t],2)}); }
   }
-  chain.innerHTML = rowsH || '<tr><td colspan="8" class="err-row">Sin tramos.</td></tr>';
+  barsSvg(document.getElementById('fwdbars-'+id), items, {
+    fy: mode === 'fwd' ? (v => fmt(v*100,2)+'%') : (v => fmt(v,2)+'%'), fv: mode === 'fwd' ? (v => fmt(v*100,2)+'%') : (v => pp(v)),
+    color: '#2f9e7a', sel: st.s+'>'+st.l, mb: 70, empty:'Sin tramos.',
+    onClick: k => { const [x, y] = k.split('>'); st.s = x; st.l = y; renderFwdTab(id); const ps = document.getElementById('parsec-'+id); if(ps) ps.scrollIntoView({behavior:'smooth', block:'start'}); }});
   renderRel(S, L, id);
 }
 /* ---- Par de especies: diferencia de tasa (larga − corta) en % y ratio de precios (corta / larga), intradiario con banda de puntas ---- */
@@ -2859,19 +2949,30 @@ function renderRel(S, Lg, id){
   const rtNow = (qS.last && qL.last) ? qS.last/qL.last : null;
   const rtLo = (qS.bid && qL.ask) ? qS.bid/qL.ask : null, rtHi = (qS.ask && qL.bid) ? qS.ask/qL.bid : null;
   const A = ilogPx(kS), B = new Map(ilogPx(kL).map(b => [b[0], b]));
-  const spPts = [], rtPts = [];
+  const spPts = [], rtPts = [], fwPts = [], fk = FWD_FAM[id].key, sob = isSob(id);
+  const fy = (t, k, p, D) => { const v = rateAt(tab, t, k, p, fk); return v == null ? null : {y:v, D}; };
+  const fw = (ps, pl) => { const f = fwdRate(fy(S.t, kS, ps, S.D), fy(Lg.t, kL, pl, Lg.D)); return f ? (sob ? f.tea : f.tem)*100 : null; };
   for(const a of A){
     const b = B.get(a[0]); if(!b) continue;
+    const f1 = fw(a[3], b[2]), f2 = fw(a[2], b[3]);   // acortar (corta ask, larga bid) · estirar (corta bid, larga ask)
+    fwPts.push({x:a[0], y: fw(a[1], b[1]), lo: f1 != null && f2 != null ? Math.min(f1, f2) : null, hi: f1 != null && f2 != null ? Math.max(f1, f2) : null});
     spPts.push({x:a[0], y: dif(r(Lg.t,kL,b[1]), r(S.t,kS,a[1])), lo: dif(r(Lg.t,kL,b[3]), r(S.t,kS,a[2])), hi: dif(r(Lg.t,kL,b[2]), r(S.t,kS,a[3]))});
     rtPts.push({x:a[0], y:(a[1]&&b[1]) ? a[1]/b[1] : null, lo:(a[2]&&b[3]) ? a[2]/b[3] : null, hi:(a[3]&&b[2]) ? a[3]/b[2] : null});
   }
-  box.innerHTML = '<div class="fx3" style="grid-template-columns:1fr 1fr">'+
+  const fNow = fw(qS.last, qL.last), fBid = fw(qS.ask, qL.bid), fOff = fw(qS.bid, qL.ask), fl = sob ? 'TIR fwd' : 'TEM fwd';
+  box.innerHTML = '<div class="fwdpar">'+
+    '<div class="fxc"><h3>Forward '+S.t+' → '+Lg.t+' ('+fl+')</h3><div class="bigv">'+(fNow==null?'—':fmt(fNow,2)+'%')+'</div>'+
+      '<div class="sub2"><span>FWD bid · acortar (puntas)</span><b>'+(fBid==null?'—':fmt(fBid,2)+'%')+'</b></div>'+
+      '<div class="sub2"><span>FWD offer · estirar (puntas)</span><b>'+(fOff==null?'—':fmt(fOff,2)+'%')+'</b></div><div id="relFw-'+id+'" style="margin-top:8px"></div></div>'+
     '<div class="fxc"><h3>Dif. de tasa · '+Lg.t+' − '+S.t+' ('+tab.curveLabel+')</h3><div class="bigv">'+pp(spNow)+'</div>'+
       '<div class="sub2"><span>Compro '+Lg.t+' / vendo '+S.t+' (puntas)</span><b>'+pp(spLo)+'</b></div>'+
       '<div class="sub2"><span>Compro '+S.t+' / vendo '+Lg.t+' (puntas)</span><b>'+pp(spHi)+'</b></div><div id="relSp-'+id+'" style="margin-top:8px"></div></div>'+
     '<div class="fxc"><h3>Ratio de precios · '+S.t+' / '+Lg.t+'</h3><div class="bigv">'+fmt(rtNow,4)+'</div>'+
       '<div class="sub2"><span>Vendo '+S.t+' (bid) / compro '+Lg.t+' (ask)</span><b>'+fmt(rtLo,4)+'</b></div>'+
       '<div class="sub2"><span>Compro '+S.t+' (ask) / vendo '+Lg.t+' (bid)</span><b>'+fmt(rtHi,4)+'</b></div><div id="relRt-'+id+'" style="margin-top:8px"></div></div></div>';
+  svgBand(document.getElementById('relFw-'+id), fwPts, {h:180, color:'#2f9e7a', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
+    labels:{y:'Último', hi:'FWD bid (acortar)', lo:'FWD offer (estirar)'}, mid:false,
+    empty:'El forward en el día se arma mientras el tablero está abierto (necesita registro de las dos especies).'});
   svgBand(document.getElementById('relSp-'+id), spPts, {h:180, color:'#c084fc', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
     labels:{y:'Último', hi:'Compro corta / vendo larga', lo:'Compro larga / vendo corta'}, mid:false,
     empty:'La diferencia intradiaria se arma mientras el tablero está abierto (necesita registro de las dos especies).'});
