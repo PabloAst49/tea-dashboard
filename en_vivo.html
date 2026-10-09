@@ -127,6 +127,15 @@ tr.dimrow td{opacity:.35;}
 .ctrlcell .off{color:var(--text-faint);font-size:11px;}
 .spread{margin-top:14px;}
 .implbox{margin:12px 0 4px;}
+.volhead{display:flex;align-items:center;gap:12px;margin:4px 0 12px;} .volhead h2{font-size:16px;margin:0;font-weight:600;} .volhead .seg{margin-left:auto;}
+.volkpi{display:flex;gap:36px;flex-wrap:wrap;margin-bottom:14px;} .volkpi span{display:block;font-family:var(--mono);font-size:11px;color:var(--text-dim);} .volkpi b{font-family:var(--mono);font-size:20px;}
+.volstack{display:flex;height:26px;border-radius:5px;overflow:hidden;gap:2px;} .volstack div{display:flex;align-items:center;padding:0 7px;font-family:var(--mono);font-size:11px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;}
+.vollegend{display:flex;flex-wrap:wrap;gap:6px 18px;margin:8px 0 6px;font-family:var(--mono);font-size:11.5px;color:var(--text-dim);} .vollegend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;} .vollegend em{font-style:normal;margin-left:3px;}
+.voldonuts{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.voldonut .vdh{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;} .voldonut .vdh span{font-family:var(--mono);font-weight:600;}
+.voldonut .vdb{display:flex;gap:12px;align-items:center;} .vdl{flex:1;font-family:var(--mono);font-size:11.5px;} .vdl div{display:flex;align-items:center;gap:6px;padding:1px 0;} .vdl i{width:9px;height:9px;border-radius:2px;flex:none;} .vdl span{flex:1;} .vdl b{font-weight:600;}
+.volrank{display:flex;flex-direction:column;gap:3px;} .vr{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;} .vr:hover{background:var(--bg3);}
+.vrt{width:64px;text-align:right;color:var(--text-dim);} .vrb{flex:1;display:flex;align-items:center;gap:6px;} .vrb div{height:15px;border-radius:2px;min-width:2px;} .vrb em{font-style:normal;color:var(--text-dim);white-space:nowrap;}
 .buyline{font-size:12px;color:var(--text-dim);background:var(--bg3);border-left:3px solid var(--accent);padding:6px 10px;border-radius:4px;margin:0 0 8px;} .buyline b{color:var(--text);}
 .arbgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;margin-top:10px;}
 .arbcard h3{display:flex;align-items:center;gap:8px;} .arbtag{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(232,195,61,.16);color:var(--warn);text-transform:none;}
@@ -216,7 +225,8 @@ tr.detrow td{background:var(--bg3);padding:10px 14px;text-align:left;}
 .alerts .al.up{border-color:rgba(79,209,165,.5);} .alerts .al.dn{border-color:rgba(232,97,95,.5);}
 .leg a,[data-zreset]{color:var(--accent);}
 table.impl td{text-align:right;} table.impl td:first-child,table.impl td:nth-child(2){text-align:left;}
-td.mainrate{font-size:15px;font-weight:700;color:var(--text) !important;}
+td.mainrate{font-size:15px;font-weight:700;color:var(--text) !important;white-space:nowrap;}
+td.mainrate .boRate{font-size:10.5px;font-weight:400;color:var(--text-dim);margin-left:3px;}
 .rp{font-family:var(--mono);font-size:12px;color:var(--text-dim);}
 .rp b{color:var(--text);font-size:13px;}
 .ref{font-family:var(--mono);font-size:11.5px;white-space:nowrap;}
@@ -1144,6 +1154,7 @@ function renderTabs(){
   addFxTab();
   addArbTab();
   addResumenTab();
+  addVolTab();
 }
 
 function switchTab(id){
@@ -1153,6 +1164,7 @@ function switchTab(id){
   if(tab) renderTable(tab); // recalcula el gráfico con el ancho real ya visible
   if(id === 'fx') renderFx();
   if(id === 'arb') renderArb();
+  if(id === 'vol') renderVol();
 }
 let _rsz = null;
 window.addEventListener('resize', () => { clearTimeout(_rsz); _rsz = setTimeout(() => { const a = document.querySelector('.panel.active'); const tab = a && TABS.find(t => 'panel-'+t.id === a.id); if(tab) renderTable(tab); }, 200); });
@@ -1307,7 +1319,10 @@ function renderTable(tab){
         td.innerHTML = (v==null ? '—' : '<b>'+f(v)+'</b>') + ((b!=null || o!=null) ? ' <span class="rng">('+f(b)+' – '+f(o)+')</span>' : '');
       }
       else if(c.pct && c.k === tab.curveKey){
-        td.textContent = fmtPct(v, c.dec);
+        // tasa principal y, chiquito entre paréntesis, la tasa al bid / al offer (bid de precio = tasa más alta)
+        const key = priceKeyFor(tab, row), q = sanePx((state.rawPM || {})[key]);
+        const rb = q.bid ? rateAt(tab, row.t, key, q.bid) : null, ro = q.ask ? rateAt(tab, row.t, key, q.ask) : null;
+        td.innerHTML = fmtPct(v, c.dec) + ((rb != null || ro != null) ? ' <span class="boRate" title="Tasa al bid / tasa al offer">('+(rb!=null?fmtPct(rb,c.dec):'—')+' / '+(ro!=null?fmtPct(ro,c.dec):'—')+')</span>' : '');
         td.classList.add('mainrate');
       }
       else if(c.pct){
@@ -2192,6 +2207,7 @@ function renderAll(){
   renderFwd();
   renderFx();
   renderArb();
+  renderVol();
   renderResumen();
 }
 
@@ -3023,6 +3039,110 @@ function renderRel(S, Lg, id){
 }
 function renderFwd(){ TABS.forEach(t => { const p = document.getElementById('panel-'+t.id); if(p && p.classList.contains('active')) renderFwdTab(t.id); }); }
 
+
+/* ============================== VOLUMEN DE LA RUEDA (formato del Histórico) ==============================
+   Monto operado hoy (data912: nominales × último / 100), por familia y por especie. Pesos o Soberanos USD (D + C). */
+state.volView = 'ars';
+const VOL_FAM_ARS = [
+  {id:'tf', lab:'Tasa Fija', col:'#2f9e7a'}, {id:'cer', lab:'CER', col:'#d06a32'}, {id:'tamar', lab:'TAMAR', col:'#4a7fd4'},
+  {id:'dl', lab:'Dollar-Linked', col:'#9a5cc6'}, {id:'dual', lab:'Duales', col:'#c9a227'}, {id:'sobars', lab:'Soberanos (pesos)', col:'#2aa3ad'},
+];
+const VOL_FAM_USD = [
+  {id:'GLOBALES', lab:'Globales', col:'#4a7fd4'}, {id:'BONARES', lab:'Bonares', col:'#2f9e7a'}, {id:'BOPREAL', lab:'BOPREAL', col:'#d06a32'},
+];
+const SLICE_COLS = ['#2f9e7a','#4a7fd4','#d06a32','#9a5cc6','#c9a227','#2aa3ad','#7d8590'];
+function volData(view){
+  const pm = state.rawPM || {}, P = state.prev && state.prev.px;
+  const fams = view === 'usd' ? VOL_FAM_USD : VOL_FAM_ARS;
+  const out = fams.map(f => Object.assign({}, f, {items: [], total: 0, prev: 0}));
+  const add = (fid, t, keys) => {
+    const f = out.find(x => x.id === fid); if(!f) return;
+    let v = 0, ops = 0, pv = 0;
+    for(const k of keys){ const o = pm[k]; if(o){ v += o.volumen || 0; ops += o.ops || 0; } if(P && P[k]) pv += P[k].m || 0; }
+    if(v > 0) f.items.push({t, v, ops});
+    f.total += v; f.prev += pv;
+  };
+  if(view === 'usd'){
+    BONDS.forEach(b => add(b.grupo, b.base, [b.base+'D', b.base+'C']));
+  } else {
+    const seen = new Set();
+    for(const id of ['dual','tf','cer','tamar','dl']){
+      for(const r of (state.lastRowsFull[id] || state.lastRows[id] || [])){
+        if(seen.has(r.t)) continue;
+        const fid = (id !== 'dual' && DUALES[r.t]) ? 'dual' : id;
+        seen.add(r.t); add(fid, r.t, [r.t]);
+      }
+    }
+    BONDS.forEach(b => add('sobars', b.base, [b.base]));
+  }
+  out.forEach(f => f.items.sort((a,b) => b.v - a.v));
+  const total = out.reduce((a,f) => a + f.total, 0), prev = out.reduce((a,f) => a + f.prev, 0);
+  const ops = out.reduce((a,f) => a + f.items.reduce((s,x) => s + (x.ops||0), 0), 0);
+  return {fams: out, total, prev, ops};
+}
+function donutSvg(slices, size){
+  const R = size/2, r = R*0.58, tot = slices.reduce((a,s) => a + s.v, 0);
+  if(!(tot > 0)) return '';
+  let a0 = -Math.PI/2, s = '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'">';
+  for(const sl of slices){
+    const frac = sl.v/tot; if(frac <= 0) continue;
+    if(frac >= 0.9999){ s += '<circle cx="'+R+'" cy="'+R+'" r="'+((R+r)/2)+'" fill="none" stroke="'+sl.col+'" stroke-width="'+(R-r)+'"/>'; continue; }
+    const a1 = a0 + frac*2*Math.PI, big = frac > 0.5 ? 1 : 0;
+    const p = (ang, rad) => (R + rad*Math.cos(ang)).toFixed(2)+','+(R + rad*Math.sin(ang)).toFixed(2);
+    s += '<path d="M'+p(a0,R)+' A'+R+','+R+' 0 '+big+' 1 '+p(a1,R)+' L'+p(a1,r)+' A'+r+','+r+' 0 '+big+' 0 '+p(a0,r)+' Z" fill="'+sl.col+'" stroke="var(--bg2)" stroke-width="1.5"><title>'+sl.lab+': '+fmt(frac*100,1)+'%</title></path>';
+    a0 = a1;
+  }
+  return s + '</svg>';
+}
+function addVolTab(){
+  if(document.getElementById('panel-vol')) return;
+  const el = document.createElement('div');
+  el.className = 'tab'; el.dataset.tab = 'vol'; el.innerHTML = 'Volumen';
+  el.onclick = () => { switchTab('vol'); renderVol(); };
+  const tabsRow = document.getElementById('tabsRow'), res = tabsRow.querySelector('.tab[data-tab=res]');
+  tabsRow.insertBefore(el, res ? res.nextSibling : tabsRow.firstChild);
+  const panel = document.createElement('div');
+  panel.className = 'panel'; panel.id = 'panel-vol';
+  panel.innerHTML = '<div class="volhead"><h2 id="volTit">Volumen de la rueda</h2>'+segBtns('volview', state.volView, [['ars','Pesos (ARS)'],['usd','Soberanos USD']])+'</div><div id="volBody"></div>';
+  document.getElementById('panels').appendChild(panel);
+  panel.querySelectorAll('.volview button').forEach(b => b.onclick = () => {
+    state.volView = b.dataset.v; panel.querySelectorAll('.volview button').forEach(x => x.classList.toggle('on', x === b)); renderVol();
+  });
+}
+function renderVol(){
+  const body = document.getElementById('volBody'); if(!body) return;
+  const view = state.volView, usd = view === 'usd', D = volData(view);
+  const fv = usd ? (v => 'USD '+fmtUsdK(v)) : (v => '$ '+fmtVolumen(v));
+  const dd = state.prev ? state.prev.date.split('-').reverse().slice(0,2).join('/') : '';
+  document.getElementById('volTit').textContent = 'Volumen · '+(usd ? 'Soberanos USD (D + C)' : 'instrumentos en pesos (ARS)')+' · hoy '+new Date().toLocaleDateString('es-AR');
+  const vs = (D.prev > 0) ? (D.total/D.prev - 1) : null;
+  let h = '<div class="volkpi"><div><span>Monto de la rueda</span><b>'+fv(D.total)+'</b></div>'+
+    '<div><span>Rueda anterior'+(dd ? ' ('+dd+')' : '')+'</span><b>'+(D.prev > 0 ? fv(D.prev) : '—')+'</b></div>'+
+    '<div><span>vs anterior</span><b class="'+(vs==null?'':vs>=0?'pos':'neg')+'">'+(vs==null ? '—' : (vs>=0?'+':'')+fmt(vs*100,0)+'%')+'</b></div>'+
+    '<div><span>Operaciones</span><b>'+(D.ops ? D.ops.toLocaleString('es-AR') : '—')+'</b></div></div>';
+  if(!(D.total > 0)){ body.innerHTML = h + '<div class="note">Sin volumen todavía.</div>'; return; }
+  // barra apilada por familia
+  const F = D.fams.filter(f => f.total > 0);
+  h += '<div class="volstack">'+F.map(f => { const p = f.total/D.total*100; return '<div style="width:'+p+'%;background:'+f.col+'" title="'+f.lab+': '+fv(f.total)+' ('+fmt(p,0)+'%)">'+(p >= 5 ? f.lab+' '+fmt(p,0)+'%' : '')+'</div>'; }).join('')+'</div>';
+  h += '<div class="vollegend">'+F.map(f => '<span><i style="background:'+f.col+'"></i>'+f.lab+' '+fv(f.total)+' ('+fmt(f.total/D.total*100,0)+'%)'+
+    (f.prev > 0 ? ' <em class="'+(f.total>=f.prev?'pos':'neg')+'">'+(f.total>=f.prev?'+':'')+fmt((f.total/f.prev-1)*100,0)+'%</em>' : '')+'</span>').join('')+'</div>';
+  // donas por familia
+  h += '<div class="secttl">Cómo se reparte cada familia entre sus especies</div><div class="voldonuts">';
+  for(const f of F){
+    const top = f.items.slice(0, 6), rest = f.items.slice(6), restV = rest.reduce((a,x) => a + x.v, 0);
+    const sl = top.map((x,i) => ({lab:x.t, v:x.v, col:SLICE_COLS[i]})); if(restV > 0) sl.push({lab:'otras ('+rest.length+')', v:restV, col:SLICE_COLS[6]});
+    h += '<div class="card voldonut"><div class="vdh"><b style="color:'+f.col+'">'+f.lab+'</b><span>'+fv(f.total)+'</span></div><div class="vdb">'+donutSvg(sl, 118)+
+      '<div class="vdl">'+sl.map(x => '<div><i style="background:'+x.col+'"></i><span>'+x.lab+'</span><b>'+fmt(x.v/f.total*100,0)+'%</b></div>').join('')+'</div></div></div>';
+  }
+  h += '</div>';
+  // ranking
+  const all = F.flatMap(f => f.items.map(x => Object.assign({}, x, {col:f.col, fam:f.lab}))).sort((a,b) => b.v - a.v).slice(0, 25);
+  const mx = all.length ? all[0].v : 1;
+  h += '<div class="secttl">Ranking de la rueda · top '+all.length+' especies</div><div class="volrank">'+
+    all.map(x => '<div class="vr" title="'+x.t+' · '+x.fam+' · '+fv(x.v)+(x.ops ? ' · '+x.ops+' operaciones' : '')+'"><span class="vrt">'+x.t+'</span><div class="vrb"><div style="width:'+(x.v/mx*100)+'%;background:'+x.col+'"></div><em>'+(usd ? fmtUsdK(x.v) : fmtVolumen(x.v))+' · '+fmt(x.v/D.total*100,0)+'%</em></div></div>').join('')+'</div>';
+  h += '<div class="secnote" style="margin-top:10px">Monto = nominales × último / 100 (data912, se actualiza cada 15 s). '+(usd ? 'Soberanos USD suma las especies D y C de cada bono, en dólares.' : 'Duales separados de CER/TAMAR/DL; Soberanos (pesos) = AL/GD/BOPREAL operados en pesos.')+' Rueda anterior = el CSV de BOLSAR cargado arriba.</div>';
+  body.innerHTML = h;
+}
 
 /* ============================== ARBITRADOR DÓLAR ==============================
    Cada soberano hard dollar (menos el AL30, que es el que arma el FX) en sus tres monedas de pago: pesos, MEP (D) y CCL (C).
