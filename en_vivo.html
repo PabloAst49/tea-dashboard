@@ -127,12 +127,12 @@ tr.dimrow td{opacity:.35;}
 .ctrlcell .off{color:var(--text-faint);font-size:11px;}
 .spread{margin-top:14px;}
 .implbox{margin:12px 0 4px;}
-.arbgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(640px,1fr));gap:12px;margin-top:10px;}
+.arbgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;margin-top:10px;}
 .arbcard h3{display:flex;align-items:center;gap:8px;} .arbtag{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(232,195,61,.16);color:var(--warn);text-transform:none;}
 .arbcard.arbcross{outline:1px solid var(--warn);} .arbcard.arbcross .arbtag{background:var(--warn);color:#111;}
-.arbcurs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.arbcurs{display:block;}
 .arbh{font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-bottom:4px;}
-table.arbt{width:100%;font-family:var(--mono);font-size:11.5px;table-layout:fixed;} table.arbt th:first-child,table.arbt td:first-child{width:46px;} table.arbt th{font-size:10px;padding:2px 4px;} table.arbt td{padding:3px 4px;text-align:right;white-space:nowrap;}
+table.arbt{width:100%;font-family:var(--mono);font-size:11.5px;table-layout:fixed;} table.arbt th:first-child,table.arbt td:first-child{width:72px;} table.arbt th{font-size:10px;padding:2px 4px;} table.arbt td{padding:3px 4px;text-align:right;white-space:nowrap;}
 table.arbt td:first-child{text-align:left;color:var(--text-dim);font-size:11px;} table.arbt tr.dir td{font-weight:600;color:var(--text);}
 table.arbt .q{display:block;font-size:9.5px;color:var(--text-faint);font-weight:400;}
 table.arbt td.best{color:var(--text);} table.arbt td.arbhi{background:rgba(232,195,61,.16);color:var(--warn);font-weight:600;} table.arbt td.arbhi .q{color:var(--warn);}
@@ -3005,6 +3005,7 @@ function renderFwd(){ TABS.forEach(t => { const p = document.getElementById('pan
    · Bid sintético en c vía m   = X_m.bid × AL30c.bid / AL30m.ask   (ej. bid GD30 en C vía pesos = GD30.bid / CCL offer)
    Lo lógico es que el mejor bid y el mejor offer de cada moneda sean los directos; si gana un sintético, hay desarbitraje. */
 const ARB_CUR = [['', 'Pesos'], ['D', 'MEP (D)'], ['C', 'CCL (C)']];
+const ARB_PAGO = {GLOBALES:'C', BONARES:'D', BOPREAL:'D'};   // moneda en la que paga cada grupo: Globales cable, Bonares y BOPREAL MEP
 state.arbFilt = 'des';
 state.arbMin = 0.0005;   // mejora mínima para marcar (0,05%): debajo de eso no compensa los costos
 function arbQuote(tk){
@@ -3013,12 +3014,12 @@ function arbQuote(tk){
   const bid = ok(o.bid), ask = ok(o.ask);
   return {last:L, bid, ask, qb: bid ? o.qbid : null, qa: ask ? o.qask : null};
 }
-function arbBond(base){
+function arbBond(base, pago){
   const X = {}, F = {};
   ARB_CUR.forEach(([k]) => { X[k] = arbQuote(base + k); F[k] = arbQuote('AL30' + k); });
   const out = {base, cur:{}};
   let any = 0;
-  for(const [c] of ARB_CUR){
+  for(const [c] of ARB_CUR.filter(([k]) => pago == null || k === pago)){
     const routes = [];
     for(const [m] of ARB_CUR){
       const x = X[m];
@@ -3043,9 +3044,9 @@ function arbBond(base){
     out.cur[c] = {routes, bestB, bestA, edgeB, edgeA, cross};
   }
   out.ok = any > 0;
-  const edges = ARB_CUR.flatMap(([c]) => [out.cur[c].edgeB, out.cur[c].edgeA, out.cur[c].cross]).filter(v => v != null && v > 0);
+  const edges = Object.values(out.cur).flatMap(C => [C.edgeB, C.edgeA, C.cross]).filter(v => v != null && v > 0);
   out.maxEdge = edges.length ? Math.max(...edges) : 0;
-  out.cross = ARB_CUR.some(([c]) => out.cur[c].cross != null);
+  out.cross = Object.values(out.cur).some(C => C.cross != null);
   return out;
 }
 function addArbTab(){
@@ -3056,10 +3057,10 @@ function addArbTab(){
   document.getElementById('tabsRow').appendChild(el);
   const panel = document.createElement('div');
   panel.className = 'panel'; panel.id = 'panel-arb';
-  panel.innerHTML = '<p class="panel-desc">Cada soberano hard dollar (sin el AL30, que es el que arma el FX) en sus tres monedas de pago. En cada moneda: <b>directo</b> = la punta de esa especie; <b>vía $ / D / C</b> = la punta en otra moneda pasada con el FX del AL30 '+
-    '(ej. offer GD30 en C vía pesos = offer GD30 en $ ÷ bid CCL; bid GD30 en C vía pesos = bid GD30 en $ ÷ offer CCL; entre D y C, con el canje del AL30). '+
-    'Lo lógico es que el mejor bid y el mejor offer de cada moneda sean los directos: <span class="arbhi">resaltado</span> = un sintético le gana al directo (con cuánto mejora). <b>Cruzado</b> = el mejor bid de una vía supera al mejor offer de otra: compro por una y vendo por la otra. '+
-    'Debajo de cada precio, los nominales en la punta de la especie; en los sintéticos, el mínimo entre esa punta y lo que alcanza la punta del AL30 para la conversión. Puntas a más de 10% del último se descartan.</p>'+
+  panel.innerHTML = '<p class="panel-desc">Cada soberano hard dollar (sin el AL30, que es el que arma el FX) en su <b>moneda de pago</b>: Globales en CCL (C), Bonares y BOPREAL en MEP (D). Tres puntas: '+
+    '<b>original</b> = la de la especie en esa moneda; <b>pesos aj.</b> = la punta en pesos pasada con el FX del AL30 (ej. offer GD30 en C = offer GD30 en $ ÷ bid CCL; bid = bid en $ ÷ offer CCL); '+
+    '<b>MEP aj. / CCL aj.</b> = la punta en la otra moneda dólar pasada con el canje del AL30. Lo lógico es que la original sea la mejor: <span class="arbhi">resaltado</span> = una ajustada le gana (y por cuánto). '+
+    '<b>Cruzado</b> = el mejor bid supera al mejor offer: compro por una y vendo por la otra. Debajo de cada precio, los nominales en la punta (en las ajustadas, el mínimo entre esa punta y lo que alcanza la punta del AL30 para convertir). Puntas a más de 10% del último se descartan.</p>'+
     '<div class="pxbar">Mostrar: '+segBtns('arbfilt', state.arbFilt, [['des','Solo desarbitrados'],['all','Todos']])+
     ' &nbsp;Mejora mínima: <select id="arbMin"><option value="0">0</option><option value="0.0005" selected>0,05%</option><option value="0.001">0,10%</option><option value="0.0025">0,25%</option><option value="0.005">0,50%</option></select> <span class="small" id="arbInfo"></span></div>'+
     '<div class="arbgrid" id="arbGrid"></div>';
@@ -3072,14 +3073,14 @@ function addArbTab(){
 function renderArb(){
   const grid = document.getElementById('arbGrid'); if(!grid) return;
   const fmtN = v => v == null ? '' : (v >= 1e6 ? fmt(v/1e6,1)+'M' : v >= 1e3 ? Math.round(v/1e3)+'k' : fmt(v,0));
-  const all = BONDS.filter(b => b.base !== 'AL30').map(b => Object.assign(arbBond(b.base), {grupo:b.grupo})).filter(x => x.ok);
+  const all = BONDS.filter(b => b.base !== 'AL30').map(b => { const pago = ARB_PAGO[b.grupo] || 'D'; return Object.assign(arbBond(b.base, pago), {grupo:b.grupo, pago}); }).filter(x => x.ok);
   const mn = state.arbMin || 0;
   const list = (state.arbFilt === 'all' ? all : all.filter(x => x.maxEdge > mn)).sort((a,b) => (b.cross - a.cross) || (b.maxEdge - a.maxEdge) || a.base.localeCompare(b.base));
   const f30 = ARB_CUR.map(([k, lab]) => { const q = arbQuote('AL30'+k); return lab+' '+fmtP(q.bid)+' / '+fmtP(q.ask); }).join(' · ');
   document.getElementById('arbInfo').textContent = list.length+' de '+all.length+' especies · AL30: '+f30;
-  const via = r => r.direct ? 'directo' : 'vía '+(r.m === '' ? '$' : r.m);
+  const via = r => r.direct ? 'original' : (r.m === '' ? 'pesos aj.' : r.m === 'D' ? 'MEP aj.' : 'CCL aj.');
   grid.innerHTML = list.map(x => {
-    const blocks = ARB_CUR.map(([c, lab]) => {
+    const blocks = ARB_CUR.filter(([c]) => c === x.pago).map(([c, lab]) => {
       const C = x.cur[c];
       const rows = C.routes.slice().sort((a,b) => b.direct - a.direct).map(r => {
         const hb = C.bestB === r && !r.direct && C.edgeB > mn, ha = C.bestA === r && !r.direct && C.edgeA > mn;
@@ -3088,9 +3089,9 @@ function renderArb(){
           '<td class="'+(ha ? 'arbhi' : (C.bestA === r ? 'best' : ''))+'">'+fmtP(r.ask)+'<span class="q">'+(ha ? '<b>−'+fmt(C.edgeA*100,2)+'%</b> · ' : '')+fmtN(r.na)+'</span></td></tr>';
       }).join('');
       const cr = C.cross != null && C.cross > mn ? '<div class="arbx">Cruzado: compro '+via(C.bestA)+' a '+fmtP(C.bestA.ask)+' y vendo '+via(C.bestB)+' a '+fmtP(C.bestB.bid)+' → +'+fmt(C.cross*100,2)+'%</div>' : '';
-      return '<div class="arbcur"><div class="arbh">'+lab+'</div><table class="arbt"><thead><tr><th></th><th>Bid</th><th>Offer</th></tr></thead><tbody>'+rows+'</tbody></table>'+cr+'</div>';
+      return '<div class="arbcur"><div class="arbh">en '+lab+' (moneda de pago)</div><table class="arbt"><thead><tr><th></th><th>Bid</th><th>Offer</th></tr></thead><tbody>'+rows+'</tbody></table>'+cr+'</div>';
     }).join('');
-    const xc = ARB_CUR.some(([c]) => x.cur[c].cross > mn);
+    const xc = Object.values(x.cur).some(C => C.cross > mn);
     return '<div class="card arbcard'+(xc ? ' arbcross' : '')+'"><h3>'+x.base+' <span class="small" style="text-transform:none">'+x.grupo+'</span>'+
       (x.maxEdge > mn ? '<span class="arbtag">'+(xc ? 'cruzado ' : 'mejora ')+'+'+fmt(x.maxEdge*100,2)+'%</span>' : '')+'</h3><div class="arbcurs">'+blocks+'</div></div>';
   }).join('') || '<div class="note">Ninguna especie con una mejora mayor a '+fmt(mn*100,2)+'%: el mejor bid y el mejor offer de cada moneda son los directos (o casi).</div>';
