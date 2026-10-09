@@ -127,6 +127,17 @@ tr.dimrow td{opacity:.35;}
 .ctrlcell .off{color:var(--text-faint);font-size:11px;}
 .spread{margin-top:14px;}
 .implbox{margin:12px 0 4px;}
+.arbgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(640px,1fr));gap:12px;margin-top:10px;}
+.arbcard h3{display:flex;align-items:center;gap:8px;} .arbtag{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(232,195,61,.16);color:var(--warn);text-transform:none;}
+.arbcard.arbcross{outline:1px solid var(--warn);} .arbcard.arbcross .arbtag{background:var(--warn);color:#111;}
+.arbcurs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.arbh{font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-bottom:4px;}
+table.arbt{width:100%;font-family:var(--mono);font-size:11.5px;table-layout:fixed;} table.arbt th:first-child,table.arbt td:first-child{width:46px;} table.arbt th{font-size:10px;padding:2px 4px;} table.arbt td{padding:3px 4px;text-align:right;white-space:nowrap;}
+table.arbt td:first-child{text-align:left;color:var(--text-dim);font-size:11px;} table.arbt tr.dir td{font-weight:600;color:var(--text);}
+table.arbt .q{display:block;font-size:9.5px;color:var(--text-faint);font-weight:400;}
+table.arbt td.best{color:var(--text);} table.arbt td.arbhi{background:rgba(232,195,61,.16);color:var(--warn);font-weight:600;} table.arbt td.arbhi .q{color:var(--warn);}
+.arbe{font-size:10px;} .arbhi{color:var(--warn);} .arbx{margin-top:4px;font-family:var(--mono);font-size:10.5px;color:var(--warn);}
+@media(max-width:700px){.arbgrid{grid-template-columns:1fr;} .arbcurs{grid-template-columns:1fr;}}
 .impltbl{margin-top:8px;} .impltbl summary{cursor:pointer;font-family:var(--mono);font-size:11.5px;color:var(--text-dim);padding:4px 0;}
 .implbox h3{display:flex;align-items:center;gap:10px;flex-wrap:wrap;} .implbox h3 .seg{text-transform:none;}
 .fwdpar{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;} @media(max-width:1100px){.fwdpar{grid-template-columns:1fr;}}
@@ -1130,6 +1141,7 @@ function renderTabs(){
     SOB_TABS.forEach(id => renderTable(TABS.find(t => t.id === id)));
   });
   addFxTab();
+  addArbTab();
   addResumenTab();
 }
 
@@ -1139,6 +1151,7 @@ function switchTab(id){
   const tab = TABS.find(t => t.id===id);
   if(tab) renderTable(tab); // recalcula el gráfico con el ancho real ya visible
   if(id === 'fx') renderFx();
+  if(id === 'arb') renderArb();
 }
 let _rsz = null;
 window.addEventListener('resize', () => { clearTimeout(_rsz); _rsz = setTimeout(() => { const a = document.querySelector('.panel.active'); const tab = a && TABS.find(t => 'panel-'+t.id === a.id); if(tab) renderTable(tab); }, 200); });
@@ -2173,6 +2186,7 @@ function renderAll(){
   renderImpl();
   renderFwd();
   renderFx();
+  renderArb();
   renderResumen();
 }
 
@@ -2982,6 +2996,105 @@ function renderRel(S, Lg, id){
 }
 function renderFwd(){ TABS.forEach(t => { const p = document.getElementById('panel-'+t.id); if(p && p.classList.contains('active')) renderFwdTab(t.id); }); }
 
+
+/* ============================== ARBITRADOR DÓLAR ==============================
+   Cada soberano hard dollar (menos el AL30, que es el que arma el FX) en sus tres monedas de pago: pesos, MEP (D) y CCL (C).
+   Directo = la punta de esa especie en esa moneda. Sintético = la punta en otra moneda pasada con el FX del AL30:
+   pasar de la moneda s a la t = compro AL30 en s (ask) y vendo AL30 en t (bid) → t por s = AL30t.bid / AL30s.ask.
+   · Offer sintético en c vía m = X_m.ask × AL30c.ask / AL30m.bid   (ej. offer GD30 en C vía pesos = GD30.ask / CCL bid)
+   · Bid sintético en c vía m   = X_m.bid × AL30c.bid / AL30m.ask   (ej. bid GD30 en C vía pesos = GD30.bid / CCL offer)
+   Lo lógico es que el mejor bid y el mejor offer de cada moneda sean los directos; si gana un sintético, hay desarbitraje. */
+const ARB_CUR = [['', 'Pesos'], ['D', 'MEP (D)'], ['C', 'CCL (C)']];
+state.arbFilt = 'des';
+state.arbMin = 0.0005;   // mejora mínima para marcar (0,05%): debajo de eso no compensa los costos
+function arbQuote(tk){
+  const o = (state.rawPM || {})[tk] || {}, L = o.precio;
+  const ok = v => v && (!L || Math.abs(v/L - 1) <= 0.10) ? v : null;
+  const bid = ok(o.bid), ask = ok(o.ask);
+  return {last:L, bid, ask, qb: bid ? o.qbid : null, qa: ask ? o.qask : null};
+}
+function arbBond(base){
+  const X = {}, F = {};
+  ARB_CUR.forEach(([k]) => { X[k] = arbQuote(base + k); F[k] = arbQuote('AL30' + k); });
+  const out = {base, cur:{}};
+  let any = 0;
+  for(const [c] of ARB_CUR){
+    const routes = [];
+    for(const [m] of ARB_CUR){
+      const x = X[m];
+      if(m === c){ routes.push({m, direct:true, bid:x.bid, ask:x.ask, nb:x.qb, na:x.qa}); continue; }
+      const fc = F[c], fm = F[m];
+      // offer sintético: compro X en m (ask) pagando con c → necesito m: compro AL30 en c (ask) y vendo en m (bid)
+      const ask = (x.ask && fc.ask && fm.bid) ? x.ask * fc.ask / fm.bid : null;
+      const capA = (x.qa != null && fc.qa != null && fm.qb != null && x.ask) ? Math.min(x.qa, Math.min(fc.qa, fm.qb) * fm.bid / x.ask) : x.qa;
+      // bid sintético: vendo X en m (bid) y paso m a c: compro AL30 en m (ask) y vendo en c (bid)
+      const bid = (x.bid && fc.bid && fm.ask) ? x.bid * fc.bid / fm.ask : null;
+      const capB = (x.qb != null && fc.qb != null && fm.qa != null && x.bid) ? Math.min(x.qb, Math.min(fm.qa, fc.qb) * fm.ask / x.bid) : x.qb;
+      routes.push({m, direct:false, bid, ask, nb: bid ? capB : null, na: ask ? capA : null});
+    }
+    if(routes.some(r => r.bid || r.ask)) any++;
+    const d = routes.find(r => r.direct);
+    const bids = routes.filter(r => r.bid), asks = routes.filter(r => r.ask);
+    const bestB = bids.length ? bids.reduce((a,b) => b.bid > a.bid ? b : a) : null;
+    const bestA = asks.length ? asks.reduce((a,b) => b.ask < a.ask ? b : a) : null;
+    const edgeB = (bestB && !bestB.direct && d.bid) ? bestB.bid/d.bid - 1 : null;     // vender vía otra moneda paga más que el bid directo
+    const edgeA = (bestA && !bestA.direct && d.ask) ? d.ask/bestA.ask - 1 : null;     // comprar vía otra moneda sale menos que el offer directo
+    const cross = (bestB && bestA && bestB.m !== bestA.m && bestB.bid > bestA.ask) ? bestB.bid/bestA.ask - 1 : null;   // compro por una vía y vendo por otra
+    out.cur[c] = {routes, bestB, bestA, edgeB, edgeA, cross};
+  }
+  out.ok = any > 0;
+  const edges = ARB_CUR.flatMap(([c]) => [out.cur[c].edgeB, out.cur[c].edgeA, out.cur[c].cross]).filter(v => v != null && v > 0);
+  out.maxEdge = edges.length ? Math.max(...edges) : 0;
+  out.cross = ARB_CUR.some(([c]) => out.cur[c].cross != null);
+  return out;
+}
+function addArbTab(){
+  if(document.getElementById('panel-arb')) return;
+  const el = document.createElement('div');
+  el.className = 'tab'; el.dataset.tab = 'arb'; el.innerHTML = 'Arbitrador $';
+  el.onclick = () => { switchTab('arb'); renderArb(); };
+  document.getElementById('tabsRow').appendChild(el);
+  const panel = document.createElement('div');
+  panel.className = 'panel'; panel.id = 'panel-arb';
+  panel.innerHTML = '<p class="panel-desc">Cada soberano hard dollar (sin el AL30, que es el que arma el FX) en sus tres monedas de pago. En cada moneda: <b>directo</b> = la punta de esa especie; <b>vía $ / D / C</b> = la punta en otra moneda pasada con el FX del AL30 '+
+    '(ej. offer GD30 en C vía pesos = offer GD30 en $ ÷ bid CCL; bid GD30 en C vía pesos = bid GD30 en $ ÷ offer CCL; entre D y C, con el canje del AL30). '+
+    'Lo lógico es que el mejor bid y el mejor offer de cada moneda sean los directos: <span class="arbhi">resaltado</span> = un sintético le gana al directo (con cuánto mejora). <b>Cruzado</b> = el mejor bid de una vía supera al mejor offer de otra: compro por una y vendo por la otra. '+
+    'Debajo de cada precio, los nominales en la punta de la especie; en los sintéticos, el mínimo entre esa punta y lo que alcanza la punta del AL30 para la conversión. Puntas a más de 10% del último se descartan.</p>'+
+    '<div class="pxbar">Mostrar: '+segBtns('arbfilt', state.arbFilt, [['des','Solo desarbitrados'],['all','Todos']])+
+    ' &nbsp;Mejora mínima: <select id="arbMin"><option value="0">0</option><option value="0.0005" selected>0,05%</option><option value="0.001">0,10%</option><option value="0.0025">0,25%</option><option value="0.005">0,50%</option></select> <span class="small" id="arbInfo"></span></div>'+
+    '<div class="arbgrid" id="arbGrid"></div>';
+  document.getElementById('panels').appendChild(panel);
+  panel.querySelector('#arbMin').onchange = (e) => { state.arbMin = +e.target.value; renderArb(); };
+  panel.querySelectorAll('.arbfilt button').forEach(b => b.onclick = () => {
+    state.arbFilt = b.dataset.v; panel.querySelectorAll('.arbfilt button').forEach(x => x.classList.toggle('on', x === b)); renderArb();
+  });
+}
+function renderArb(){
+  const grid = document.getElementById('arbGrid'); if(!grid) return;
+  const fmtN = v => v == null ? '' : (v >= 1e6 ? fmt(v/1e6,1)+'M' : v >= 1e3 ? Math.round(v/1e3)+'k' : fmt(v,0));
+  const all = BONDS.filter(b => b.base !== 'AL30').map(b => Object.assign(arbBond(b.base), {grupo:b.grupo})).filter(x => x.ok);
+  const mn = state.arbMin || 0;
+  const list = (state.arbFilt === 'all' ? all : all.filter(x => x.maxEdge > mn)).sort((a,b) => (b.cross - a.cross) || (b.maxEdge - a.maxEdge) || a.base.localeCompare(b.base));
+  const f30 = ARB_CUR.map(([k, lab]) => { const q = arbQuote('AL30'+k); return lab+' '+fmtP(q.bid)+' / '+fmtP(q.ask); }).join(' · ');
+  document.getElementById('arbInfo').textContent = list.length+' de '+all.length+' especies · AL30: '+f30;
+  const via = r => r.direct ? 'directo' : 'vía '+(r.m === '' ? '$' : r.m);
+  grid.innerHTML = list.map(x => {
+    const blocks = ARB_CUR.map(([c, lab]) => {
+      const C = x.cur[c];
+      const rows = C.routes.slice().sort((a,b) => b.direct - a.direct).map(r => {
+        const hb = C.bestB === r && !r.direct && C.edgeB > mn, ha = C.bestA === r && !r.direct && C.edgeA > mn;
+        return '<tr class="'+(r.direct ? 'dir' : '')+'"><td>'+via(r)+'</td>'+
+          '<td class="'+(hb ? 'arbhi' : (C.bestB === r ? 'best' : ''))+'">'+fmtP(r.bid)+'<span class="q">'+(hb ? '<b>+'+fmt(C.edgeB*100,2)+'%</b> · ' : '')+fmtN(r.nb)+'</span></td>'+
+          '<td class="'+(ha ? 'arbhi' : (C.bestA === r ? 'best' : ''))+'">'+fmtP(r.ask)+'<span class="q">'+(ha ? '<b>−'+fmt(C.edgeA*100,2)+'%</b> · ' : '')+fmtN(r.na)+'</span></td></tr>';
+      }).join('');
+      const cr = C.cross != null && C.cross > mn ? '<div class="arbx">Cruzado: compro '+via(C.bestA)+' a '+fmtP(C.bestA.ask)+' y vendo '+via(C.bestB)+' a '+fmtP(C.bestB.bid)+' → +'+fmt(C.cross*100,2)+'%</div>' : '';
+      return '<div class="arbcur"><div class="arbh">'+lab+'</div><table class="arbt"><thead><tr><th></th><th>Bid</th><th>Offer</th></tr></thead><tbody>'+rows+'</tbody></table>'+cr+'</div>';
+    }).join('');
+    const xc = ARB_CUR.some(([c]) => x.cur[c].cross > mn);
+    return '<div class="card arbcard'+(xc ? ' arbcross' : '')+'"><h3>'+x.base+' <span class="small" style="text-transform:none">'+x.grupo+'</span>'+
+      (x.maxEdge > mn ? '<span class="arbtag">'+(xc ? 'cruzado ' : 'mejora ')+'+'+fmt(x.maxEdge*100,2)+'%</span>' : '')+'</h3><div class="arbcurs">'+blocks+'</div></div>';
+  }).join('') || '<div class="note">Ninguna especie con una mejora mayor a '+fmt(mn*100,2)+'%: el mejor bid y el mejor offer de cada moneda son los directos (o casi).</div>';
+}
 
 /* ============================== HISTÓRICO SOBERANOS (CSV BOLSAR) ============================== */
 let HSEL = null;
