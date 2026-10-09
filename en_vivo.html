@@ -127,6 +127,7 @@ tr.dimrow td{opacity:.35;}
 .ctrlcell .off{color:var(--text-faint);font-size:11px;}
 .spread{margin-top:14px;}
 .implbox{margin:12px 0 4px;}
+.buyline{font-size:12px;color:var(--text-dim);background:var(--bg3);border-left:3px solid var(--accent);padding:6px 10px;border-radius:4px;margin:0 0 8px;} .buyline b{color:var(--text);}
 .arbgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;margin-top:10px;}
 .arbcard h3{display:flex;align-items:center;gap:8px;} .arbtag{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(232,195,61,.16);color:var(--warn);text-transform:none;}
 .arbcard.arbcross{outline:1px solid var(--warn);} .arbcard.arbcross .arbtag{background:var(--warn);color:#111;}
@@ -1251,14 +1252,14 @@ function renderTable(tab){
         if(!x){ td.innerHTML = '<span class="rng">—</span>'; }
         else {
           // color según la variación contra la rueda anterior (no contra la apertura)
-          const dd = x.tasa ? (row.dRate == null ? null : -row.dRate) : row.dPx;
+          const dd = row.dRate != null ? -row.dRate : row.dPx;   // baja la tasa = verde (en precio o en tasa); sin tasa, por precio
           const cls = dd == null ? '' : dd > 0 ? 'up' : dd < 0 ? 'dn' : '';
           const col = cls === 'up' ? 'var(--accent)' : cls === 'dn' ? 'var(--bad)' : 'var(--text-dim)';
           const f = row._flow, usd = isSob(tab.id);
           td.innerHTML = '<div class="flowc'+(f && f.hot ? ' hot' : '')+'">'+hoyVolSvg(x.pts, x.bars, col)+
             '<span class="fv" title="Últimos 15 min">'+(f && f.flow > 0 ? (usd ? fmtUsdK(f.flow) : fmtVolumen(f.flow)) : '')+'</span></div>';
           td.title = 'Arriba: '+(x.tasa ? 'tasa' : 'precio')+' en el día desde las 10:40 ('+(x.tasa ? fmt(x.v0,3)+'% → '+fmt(x.v1,3)+'%' : fmtP(x.v0)+' → '+fmtP(x.v1))+'). '+
-            'Abajo: volumen operado por minuto, mismo eje de tiempo (amarillo = últimos 15 min). Color = variación vs rueda anterior.'+
+            'Abajo: volumen operado por minuto, mismo eje de tiempo (amarillo = últimos 15 min). Color = variación de la tasa vs la rueda anterior (verde = baja la tasa).'+
             (f ? ' Últimos 15 min: '+(usd ? fmtUsdK(f.flow)+' USD' : fmtVolumen(f.flow))+' ('+fmt(f.share*100,0)+'% de lo del día)' : '');
         }
       }
@@ -1983,11 +1984,15 @@ function drawDetail(tab, row){
   const pv = state.prev && state.prev.px[key] ? state.prev.px[key].p : null;
   const dd = state.prev ? state.prev.date.split('-').reverse().slice(0,2).join('/') : '';
   const sp = (q.bid && q.ask) ? (q.ask/q.bid - 1)*100 : null;
+  const lastsD = ilogPx(key).map(a => a[1]).filter(v => v); if(q.precio) lastsD.push(q.precio);
+  const pMin = lastsD.length ? Math.min(...lastsD) : null, pMax = lastsD.length ? Math.max(...lastsD) : null;
+  const rMM = v => { const r = v ? rateAt(tab, row.t, key, v) : null; return r == null ? '' : ' <span class="small">('+fmtPct(r,2)+')</span>'; };
   host.innerHTML = '<div class="dstats"><span>'+key+'</span>'+
     '<span>Previo (VWAP '+(dd||'—')+')<b>'+fmtP(pv)+'</b></span><span>Último<b>'+fmtP(q.precio)+'</b></span>'+
     '<span>Bid<b>'+fmtP(q.bid)+'</b></span><span>Offer<b>'+fmtP(q.ask)+'</b></span><span>Mid<b>'+fmtP(mid)+'</b></span>'+
-    '<span>Spread<b>'+(sp==null?'—':fmt(sp,2)+'%')+'</b></span><span>Δ vs previo<b class="'+(pv&&q.precio?(q.precio>=pv?'pos':'neg'):'')+'">'+(pv&&q.precio?((q.precio/pv-1)*100>=0?'+':'')+fmt((q.precio/pv-1)*100,2)+'%':'—')+'</b></span></div>'+
-    '<div id="detc-'+tab.id+'"></div><div class="note" style="font-size:11px;color:var(--text-faint)">Banda = bid–offer · línea = mid · guiones = promedio de la rueda anterior (desde las 10:40). Tasa o precio según el switch "Intradiario en". Se arma con un punto por minuto mientras el tablero está abierto (horario de rueda). Click en la especie para cerrar.</div>';
+    '<span>Spread<b>'+(sp==null?'—':fmt(sp,2)+'%')+'</b></span>'+
+    '<span>Mín del día<b>'+fmtP(pMin)+rMM(pMin)+'</b></span><span>Máx del día<b>'+fmtP(pMax)+rMM(pMax)+'</b></span><span>Δ vs previo<b class="'+(pv&&q.precio?(q.precio>=pv?'pos':'neg'):'')+'">'+(pv&&q.precio?((q.precio/pv-1)*100>=0?'+':'')+fmt((q.precio/pv-1)*100,2)+'%':'—')+'</b></span></div>'+
+    '<div id="detc-'+tab.id+'"></div><div class="note" style="font-size:11px;color:var(--text-faint)">Banda = bid–offer · línea = mid · guiones = promedio de la rueda anterior (desde las 10:40). Mín / máx = último operado más bajo y más alto del día (entre paréntesis, su tasa). Tasa o precio según el switch "Intradiario en". Se arma con un punto por minuto mientras el tablero está abierto (horario de rueda). Click en la especie para cerrar.</div>';
   const arr = ilogPx(key);
   const color = isSob(tab.id) ? GRUPO_COLOR[row.grupo] : 'var(--accent)';
   if(state.iunit[tab.id] !== 'px'){
@@ -2469,6 +2474,14 @@ function renderResumen(){
    CER: réplica de CER!K · TAMAR: réplica de TAMAR!K (TAMAR BE) · DL: A3500 BE (DL!Q) y devaluación mensual implícita hasta vto − 3 hábiles.
    Se muestran en cada pestaña (debajo de la tabla) y todas juntas en la pestaña Implícitas. "Hoy" = la implícita minuto a minuto. */
 const pp = (v, d) => v == null || !isFinite(v) ? '—' : (v>0?'+':'')+fmt(v, d==null?2:d)+'%';   // diferencias de tasa, en puntos porcentuales
+const BUY_TXT = {
+  cer:   '<b>Comprar inflación</b> = pasar de tasa fija a CER: compro el CER al ask y vendo la TF al bid → pagás el <b>offer</b> (la inflación implícita más alta). <b>Vender inflación</b> = pasar de CER a TF → <b>bid</b> (la más baja).',
+  tamar: '<b>Comprar TAMAR</b> = pasar de tasa fija a TAMAR: compro el TAMAR al ask y vendo la TF al bid → pagás el <b>offer</b> (la TAMAR BE más alta). <b>Vender TAMAR</b> = pasar de TAMAR a TF → <b>bid</b>.',
+  dl:    '<b>Comprar devaluación</b> (cobertura) = pasar de tasa fija a DL: compro el DL al ask y vendo la TF al bid → pagás el <b>offer</b> (la devaluación implícita más alta). <b>Vender devaluación</b> = pasar de DL a TF → <b>bid</b>.',
+  sob:   '<b>Comprar el spread</b> = comprar A y vender B (en ley: pasarte a AL = riesgo local; en BOPREAL: pasarte al AO/AL) → pagás el <b>offer</b> (el spread más bajo: A sale caro). <b>Vender el spread</b> = pasarte a B → <b>bid</b> (el más alto).',
+  fwd:   '<b>Comprar el forward</b> = estirar: compro la larga al ask y vendo la corta al bid → pagás el <b>offer</b> (la tasa fwd más baja). <b>Vender el forward</b> = acortar: compro la corta al ask y vendo la larga al bid → <b>bid</b> (la más alta). Igual que un bono: comprar = tasa más baja.',
+};
+const buyLine = k => '<div class="buyline">'+BUY_TXT[k]+'</div>';
 const IMPL_FAM = [
   {id:'cer',   tit:'Inflación implícita · CER vs tasa fija',   key:'inflBE', b:'inflBid', o:'inflOff', fmtV: v => fmtPct(v,2), lab:'Infl. mensual'},
   {id:'tamar', tit:'TAMAR implícita (BE) · TAMAR vs tasa fija', key:'tamarBE', b:'tamarBid', o:'tamarOff', fmtV: v => fmtPct(v,2), lab:'TAMAR BE (TNA)'},
@@ -2593,7 +2606,7 @@ function barsSvg(host, items, o){
   const ok = v => v != null && isFinite(v);
   const I = items.filter(x => ok(x.v));
   if(!I.length){ host.innerHTML = '<p class="sub" style="padding:8px 0">'+(o.empty || 'Sin datos.')+'</p>'; return; }
-  const W = Math.max(340, host.clientWidth || 760), H = o.h || 240, m = {l:54, r:10, t:22, b:o.mb || 62};
+  const W = Math.max(340, host.clientWidth || 760), H = o.h || 240, m = {l:54, r:10, t: items.some(x => x.bid != null || x.off != null) ? 46 : 22, b:o.mb || 62};
   const vals = [0]; I.forEach(x => [x.v, x.lo, x.hi, x.prev].forEach(v => ok(v) && vals.push(v))); if(ok(o.ref)) vals.push(o.ref);
   let ylo = Math.min(...vals), yhi = Math.max(...vals); const pad = (yhi-ylo)*0.14 || 1e-6; yhi += pad; if(ylo < 0) ylo -= pad;
   const Y = v => H-m.b - (v-ylo)/(yhi-ylo)*(H-m.t-m.b);
@@ -2616,7 +2629,13 @@ function barsSvg(host, items, o){
       s += '<line x1="'+cx+'" x2="'+cx+'" y1="'+a+'" y2="'+b+'" stroke="var(--text)" stroke-width="1" opacity=".7"/><line x1="'+(cx-4)+'" x2="'+(cx+4)+'" y1="'+a+'" y2="'+a+'" stroke="var(--text)" opacity=".7"/><line x1="'+(cx-4)+'" x2="'+(cx+4)+'" y1="'+b+'" y2="'+b+'" stroke="var(--text)" opacity=".7"/>'; }
     if(ok(x.prev)) s += '<line x1="'+(cx-bw/2-3)+'" x2="'+(cx+bw/2+3)+'" y1="'+Y(x.prev)+'" y2="'+Y(x.prev)+'" stroke="var(--text)" stroke-width="2" stroke-dasharray="3 2"/>';
     const top = Math.min(y1, ok(x.hi) ? Y(x.hi) : y1, ok(x.lo) ? Y(x.lo) : y1), bot = Math.max(y1, ok(x.hi) ? Y(x.hi) : y1, ok(x.lo) ? Y(x.lo) : y1);
-    s += '<text x="'+cx+'" y="'+(x.v >= 0 ? top-5 : bot+12)+'" text-anchor="middle" font-size="10.5" fill="var(--text)" font-family="var(--mono)">'+o.fv(x.v)+'</text>';
+    // valor + bid / offer (cuando los hay), apilados arriba de la barra (o abajo si es negativa)
+    const lines = [o.fv(x.v)];
+    if(ok(x.bid) || ok(x.off)) lines.push('b '+(ok(x.bid)?o.fv(x.bid):'—'), 'o '+(ok(x.off)?o.fv(x.off):'—'));
+    lines.forEach((t, j) => {
+      const y = x.v >= 0 ? top - 5 - j*11 : bot + 12 + j*11;
+      s += '<text x="'+cx+'" y="'+y+'" text-anchor="middle" font-size="'+(j?9:10.5)+'" fill="'+(j?'var(--text-dim)':'var(--text)')+'" font-family="var(--mono)">'+t+'</text>';
+    });
     s += '<text transform="translate('+cx+','+(H-m.b+12)+') rotate(-35)" text-anchor="end" font-size="10.5" fill="'+(sel?'var(--text)':'var(--text-dim)')+'" font-family="var(--mono)">'+x.lab+'</text></g>';
   });
   host.innerHTML = s + '</svg>';
@@ -2654,7 +2673,7 @@ function sobSpread(def, getPx, ch){
 }
 // puntas absurdas (ej. un bid de 0,46 con último 52) se descartan: más de 10% lejos del último
 function sanePx(o){ o = o || {}; const L = o.precio, ok = v => v && (!L || Math.abs(v/L - 1) <= 0.10) ? v : null; return {last:L, bid:ok(o.bid), ask:ok(o.ask)}; }
-const sobHead = () => '<tr><th>Relación</th><th>Spread TIR</th>'+(state.prev ? '<th>Δ vs '+prevLbl()+'</th>' : '')+'<th>Compro A / vendo B</th><th>Vendo A / compro B</th><th>A · precio (bid / ask) · TIR</th><th>B · precio (bid / ask) · TIR</th></tr>';
+const sobHead = () => '<tr><th>Relación</th><th>Spread TIR</th>'+(state.prev ? '<th>Δ vs '+prevLbl()+'</th>' : '')+'<th>Offer · compro A / vendo B</th><th>Bid · vendo A / compro B</th><th>A · precio (bid / ask) · TIR</th><th>B · precio (bid / ask) · TIR</th></tr>';
 const SOB_NOTE = 'Spread = TIR de A − TIR de B, en puntos porcentuales (en B, promedio simple de sus TIR). Compro A / vendo B = A al ask y B al bid; vendo A / compro B = A al bid y B al ask. Las dos patas con el mismo canal. Click en una fila para ver el intradiario.';
 function renderSobImplInto(body, defs, cont){
   if(!body) return [];
@@ -2667,7 +2686,7 @@ function renderSobImplInto(body, defs, cont){
       return '<div class="ref"><b>'+b+ch+'</b> '+fmtP(o.last)+' <span class="rng">('+fmtP(o.bid)+' / '+fmtP(o.ask)+')</span> · '+fmtPct(t,2)+'</div>'; }).join('');
     const sp = state.prev ? withPrev(pm0 => sobSpread(def, b => ({last: pm0[b + ch] && pm0[b + ch].precio}), ch)) : null;
     const dTd = state.prev ? '<td>'+((sp && sp.last != null && s.last != null) ? pp(s.last - sp.last) : '<span class="rng">—</span>')+'</td>' : '';
-    out.push({k:def.id, lab:def.lab.replace('Ley · ','').replace(' vs prom. ',' vs ').replace('BOPREAL ','BP '), v:s.last, lo:s.lo, hi:s.hi, prev: sp && sp.last, ch});
+    out.push({k:def.id, lab:def.lab.replace('Ley · ','').replace(' vs prom. ',' vs ').replace('BOPREAL ','BP '), v:s.last, lo:s.lo, hi:s.hi, bid:s.hi, off:s.lo, prev: sp && sp.last, ch});
     let html = '<tr class="sobrow" data-sob="'+cont+':'+def.id+'" style="cursor:pointer"><td><b>'+def.lab+'</b> <span class="small">'+ch+'</span></td><td class="mainrate">'+pp(s.last)+'</td>'+dTd+'<td>'+pp(s.lo)+'</td><td>'+pp(s.hi)+'</td>'+
       '<td style="text-align:left">'+ref(def.A)+'</td><td style="text-align:left">'+ref(def.B)+'</td></tr>';
     return html;
@@ -2728,9 +2747,9 @@ const tblWrap = (id, head, note) => '<details class="impltbl"><summary>Ver tabla
 function implBoxHtml(tab){
   const f = IMPL_FAM.find(x => x.id === tab.id), id = tab.id;
   const bars = '<div id="implbars-'+id+'"></div><div id="implchart-'+id+'"></div>';
-  if(f) return '<div class="card implbox implmain"><h3>'+f.tit+' <span class="small" style="text-transform:none">· click en una barra para verla en el día</span></h3>'+bars+tblWrap(id, implHeadHtml(f), 'Barra = implícita con el último · bigote = bid – offer · raya punteada = rueda anterior (si cargaste el CSV)'+(id==='tamar' ? ' · línea amarilla = TAMAR vigente' : '')+'. '+IMPL_NOTE)+'</div>';
+  if(f) return '<div class="card implbox implmain"><h3>'+f.tit+' <span class="small" style="text-transform:none">· click en una barra para verla en el día</span></h3>'+buyLine(id)+bars+tblWrap(id, implHeadHtml(f), 'Barra = implícita con el último · arriba: b = bid, o = offer · bigote = bid – offer · raya punteada = rueda anterior (si cargaste el CSV)'+(id==='tamar' ? ' · línea amarilla = TAMAR vigente' : '')+'. '+IMPL_NOTE)+'</div>';
   if(id === 'dual') return '<div class="card implbox implmain"><h3>Costo de la opcionalidad · dual vs curvas puras</h3>'+bars+tblWrap(id, '', 'Azul = pata TAMAR · naranja = pata CER · violeta = pata DL · más apagado = extrapolado. '+DUAL_NOTE)+'</div>';
-  if(isSob(id)) return '<div class="card implbox implmain"><h3>Implícitas · spreads de TIR <span class="small" style="text-transform:none">· click en una barra para verla en el día</span></h3>'+bars+tblWrap(id, sobHead(), 'Barra = spread con el último · bigote = puntas · raya punteada = rueda anterior. '+SOB_NOTE)+'</div>';
+  if(isSob(id)) return '<div class="card implbox implmain"><h3>Implícitas · spreads de TIR <span class="small" style="text-transform:none">· click en una barra para verla en el día</span></h3>'+buyLine('sob')+bars+tblWrap(id, sobHead(), 'Barra = spread con el último · arriba: b = bid, o = offer · bigote = puntas · raya punteada = rueda anterior. '+SOB_NOTE)+'</div>';
   return '';
 }
 function renderImplBox(tab){
@@ -2741,7 +2760,7 @@ function renderImplBox(tab){
     const rows = implRowsFor(f.id), pv = prevImplMap(f.id);
     body.innerHTML = implBodyHtml(f, rows);
     const items = rows.filter(r => r[f.key] != null).map(r => { const b = r[f.b], o = r[f.o];
-      return {k:r.t, lab:r.t, v:r[f.key], lo: b != null && o != null ? Math.min(b,o) : null, hi: b != null && o != null ? Math.max(b,o) : null, prev: pv && pv[r.t],
+      return {k:r.t, lab:r.t, v:r[f.key], bid:b, off:o, lo: b != null && o != null ? Math.min(b,o) : null, hi: b != null && o != null ? Math.max(b,o) : null, prev: pv && pv[r.t],
         tip: r.t+' · '+f.lab+' '+fmtPct(r[f.key],2)+' (bid '+fmtPct(b,2)+' / offer '+fmtPct(o,2)+')'+(pv && pv[r.t] != null ? ' · rueda ant. '+fmtPct(pv[r.t],2) : '')}; });
     const vig = id === 'tamar' ? (rows.find(r => r.tamarVig != null) || {}).tamarVig : null;
     const sel = state.implSel[id] && items.some(x => x.k === state.implSel[id]) ? state.implSel[id] : null;
@@ -2875,7 +2894,7 @@ function fwdSectionHtml(tab){
   if(!FWD_FAM[tab.id]) return '';
   const id = tab.id;
   return '<div class="card implbox" id="fwdsec-'+id+'"><h3>Forwards entre especies · vecinas '+segBtns('fwdmode', 'fwd', [['fwd','Forward'],['dif','Dif. de tasa']])+'</h3>'+
-      '<div id="fwdbars-'+id+'"></div>'+
+      buyLine('fwd')+'<div id="fwdbars-'+id+'"></div>'+
       '<div class="note">Una barra por tramo entre especies vecinas (consecutivas por duration). Forward = tasa implícita entre los dos vencimientos: ratio = (1+TEA larga)^D larga / (1+TEA corta)^D corta, pasada a '+(isSob(id)?'TIR (TEA)':'TEM')+'; bigote = FWD bid (acortar) – FWD offer (estirar). '+
       'Dif. = '+tab.curveLabel+' larga − corta. Exacto en cero cupón; en soberanos y multicupón, aproximado por duration y con ≥ 60 días de diferencia. Click en una barra para ver el par abajo (con el forward en el día).</div></div>';
 }
@@ -2883,7 +2902,7 @@ const isMultiCup = t => CER_MULTICUPON.some(b => b.t === t);
 function parSectionHtml(tab){
   if(!FWD_FAM[tab.id]) return '';
   const id = tab.id;
-  return '<div class="card implbox" id="parsec-'+id+'"><h3>Par de especies</h3>'+
+  return '<div class="card implbox" id="parsec-'+id+'"><h3>Par de especies</h3>'+buyLine('fwd')+
       '<div class="calc" style="margin:0 0 10px">Corta <select id="fwdS-'+id+'"></select> Larga <select id="fwdL-'+id+'"></select><span id="fwdInfo-'+id+'" class="small"></span></div>'+
       '<div id="relBox-'+id+'"></div>'+
       '<div class="table-wrap" style="margin-top:10px"><table class="impl"><thead><tr><th>Precio usado</th><th>Corta</th><th>Larga</th><th>TEM fwd</th><th>TNA fwd</th><th>TEA fwd</th></tr></thead><tbody id="fwdBody-'+id+'"></tbody></table></div>'+
@@ -2919,8 +2938,8 @@ function renderFwdTab(id){
     document.getElementById('fwdInfo-'+id).textContent = ' tramo de '+(f0 ? f0.dias : Math.round((L.D-S.D)*365))+' días'+extra;
     const lines = [
       ['Último operado (o precio editado)', S.yl, L.yl],
-      ['FWD bid · acortar (compro corta ask, vendo larga bid)', S.ya, L.yb],
-      ['FWD offer · estirar (compro larga ask, vendo corta bid)', S.yb, L.ya],
+      ['Offer · comprar fwd = estirar (compro larga ask, vendo corta bid)', S.yb, L.ya],
+      ['Bid · vender fwd = acortar (compro corta ask, vendo larga bid)', S.ya, L.yb],
     ];
     body.innerHTML = lines.map(([lab, a, b]) => { const f = fwdRate(a, b);
       return '<tr><td>'+lab+'</td><td>'+px(a && a.p)+'</td><td>'+px(b && b.p)+'</td>'+
@@ -2938,7 +2957,7 @@ function renderFwdTab(id){
     if(!fl) continue;
     const g = f => f ? (sob ? f.tea : f.tem) : null;
     const k = a.t+'>'+b.t, lab = a.t+'→'+b.t;
-    if(mode === 'fwd') items.push({k, lab, v:g(fl), lo: fb && fo ? Math.min(g(fb), g(fo)) : null, hi: fb && fo ? Math.max(g(fb), g(fo)) : null,
+    if(mode === 'fwd') items.push({k, lab, v:g(fl), bid:g(fb), off:g(fo), lo: fb && fo ? Math.min(g(fb), g(fo)) : null, hi: fb && fo ? Math.max(g(fb), g(fo)) : null,
       tip: lab+' · '+fl.dias+' días · '+(sob?'TIR':'TEM')+' fwd '+fmtPct(g(fl),2)+' (bid '+fmtPct(g(fb),2)+' / offer '+fmtPct(g(fo),2)+') · TEA fwd '+fmtPct(fl.tea,2)});
     else { const d = (cur[b.t] != null && cur[a.t] != null) ? (cur[b.t] - cur[a.t])*100 : null; if(d != null) items.push({k, lab, v:d, tip: lab+' · '+tab.curveLabel+' '+fmtPct(cur[b.t],2)+' − '+fmtPct(cur[a.t],2)}); }
   }
@@ -2976,19 +2995,19 @@ function renderRel(S, Lg, id){
   const fNow = fw(qS.last, qL.last), fBid = fw(qS.ask, qL.bid), fOff = fw(qS.bid, qL.ask), fl = sob ? 'TIR fwd' : 'TEM fwd';
   box.innerHTML = '<div class="fwdpar">'+
     '<div class="fxc"><h3>Forward '+S.t+' → '+Lg.t+' ('+fl+')</h3><div class="bigv">'+(fNow==null?'—':fmt(fNow,2)+'%')+'</div>'+
-      '<div class="sub2"><span>FWD bid · acortar (puntas)</span><b>'+(fBid==null?'—':fmt(fBid,2)+'%')+'</b></div>'+
-      '<div class="sub2"><span>FWD offer · estirar (puntas)</span><b>'+(fOff==null?'—':fmt(fOff,2)+'%')+'</b></div><div id="relFw-'+id+'" style="margin-top:8px"></div></div>'+
+      '<div class="sub2"><span>Offer · comprar fwd = estirar</span><b>'+(fOff==null?'—':fmt(fOff,2)+'%')+'</b></div>'+
+      '<div class="sub2"><span>Bid · vender fwd = acortar</span><b>'+(fBid==null?'—':fmt(fBid,2)+'%')+'</b></div><div id="relFw-'+id+'" style="margin-top:8px"></div></div>'+
     '<div class="fxc"><h3>Dif. de tasa · '+Lg.t+' − '+S.t+' ('+tab.curveLabel+')</h3><div class="bigv">'+pp(spNow)+'</div>'+
-      '<div class="sub2"><span>Compro '+Lg.t+' / vendo '+S.t+' (puntas)</span><b>'+pp(spLo)+'</b></div>'+
-      '<div class="sub2"><span>Compro '+S.t+' / vendo '+Lg.t+' (puntas)</span><b>'+pp(spHi)+'</b></div><div id="relSp-'+id+'" style="margin-top:8px"></div></div>'+
+      '<div class="sub2"><span>Offer · compro '+Lg.t+' / vendo '+S.t+'</span><b>'+pp(spLo)+'</b></div>'+
+      '<div class="sub2"><span>Bid · compro '+S.t+' / vendo '+Lg.t+'</span><b>'+pp(spHi)+'</b></div><div id="relSp-'+id+'" style="margin-top:8px"></div></div>'+
     '<div class="fxc"><h3>Ratio de precios · '+S.t+' / '+Lg.t+'</h3><div class="bigv">'+fmt(rtNow,4)+'</div>'+
       '<div class="sub2"><span>Vendo '+S.t+' (bid) / compro '+Lg.t+' (ask)</span><b>'+fmt(rtLo,4)+'</b></div>'+
       '<div class="sub2"><span>Compro '+S.t+' (ask) / vendo '+Lg.t+' (bid)</span><b>'+fmt(rtHi,4)+'</b></div><div id="relRt-'+id+'" style="margin-top:8px"></div></div></div>';
   svgBand(document.getElementById('relFw-'+id), fwPts, {h:180, color:'#2f9e7a', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
-    labels:{y:'Último', hi:'FWD bid (acortar)', lo:'FWD offer (estirar)'}, mid:false,
+    labels:{y:'Último', hi:'Bid · vender fwd (acortar)', lo:'Offer · comprar fwd (estirar)'}, mid:false,
     empty:'El forward en el día se arma mientras el tablero está abierto (necesita registro de las dos especies).'});
   svgBand(document.getElementById('relSp-'+id), spPts, {h:180, color:'#c084fc', fy: v => fmt(v,2)+'%', ft: v => fmt(v,3)+'%',
-    labels:{y:'Último', hi:'Compro corta / vendo larga', lo:'Compro larga / vendo corta'}, mid:false,
+    labels:{y:'Último', hi:'Bid · compro corta / vendo larga', lo:'Offer · compro larga / vendo corta'}, mid:false,
     empty:'La diferencia intradiaria se arma mientras el tablero está abierto (necesita registro de las dos especies).'});
   svgBand(document.getElementById('relRt-'+id), rtPts, {h:180, color:'#60a5fa', fy: v => fmt(v,4), ft: v => fmt(v,5),
     labels:{y:'Último', hi:'Compro corta / vendo larga', lo:'Vendo corta / compro larga'}, mid:false,
