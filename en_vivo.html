@@ -1808,7 +1808,7 @@ function recordIntraday(){
   const keys = new Set();
   [TF, CER, TAMAR, DL].forEach(a => a.forEach(b => keys.add(b.t)));
   CER_MULTICUPON.forEach(b => keys.add(b.t));
-  BONDS.forEach(b => { keys.add(b.base+'D'); keys.add(b.base+'C'); keys.add(b.base); });
+  BONDS.forEach(b => { keys.add(b.base+'D'); keys.add(b.base+'C'); keys.add(monTk(b.base, '')); });
   const minute = Math.floor(t/60000)*60000;
   for(const k of keys){
     const o = pm[k]; if(!o || !(o.precio || o.bid || o.ask)) continue;
@@ -3089,7 +3089,7 @@ function volData(view){
         seen.add(r.t); add(fid, r.t, [r.t]);
       }
     }
-    BONDS.forEach(b => add('sobars', b.base, [b.base]));
+    BONDS.forEach(b => add('sobars', b.base, [monTk(b.base, '')]));
   }
   out.forEach(f => f.items.sort((a,b) => b.v - a.v));
   const total = out.reduce((a,f) => a + f.total, 0), prev = out.reduce((a,f) => a + f.prev, 0);
@@ -3171,6 +3171,7 @@ const ARB_CUR = [['', 'Pesos'], ['D', 'MEP (D)'], ['C', 'CCL (C)']];
 const ARB_PAGO = {GLOBALES:'C', BONARES:'D', BOPREAL:'D'};   // moneda en la que paga cada grupo: Globales cable, Bonares y BOPREAL MEP
 state.arbFilt = 'des';
 state.arbMin = 0.0005;   // mejora mínima para marcar (0,05%): debajo de eso no compensa los costos
+function monTk(base, k){ return (k === '' && /^BP[A-Z]\d$/.test(base)) ? 'BPO'+base.slice(2) : base + k; }
 function arbQuote(tk){
   const o = (state.rawPM || {})[tk] || {}, L = o.precio;
   const ok = v => v && (!L || Math.abs(v/L - 1) <= 0.10) ? v : null;
@@ -3179,14 +3180,14 @@ function arbQuote(tk){
 }
 function arbBond(base, pago){
   const X = {}, F = {};
-  ARB_CUR.forEach(([k]) => { X[k] = arbQuote(base + k); F[k] = arbQuote('AL30' + k); });
+  ARB_CUR.forEach(([k]) => { X[k] = arbQuote(monTk(base, k)); F[k] = arbQuote('AL30' + k); });
   const out = {base, cur:{}};
   let any = 0;
   for(const [c] of ARB_CUR.filter(([k]) => pago == null || k === pago)){
     const routes = [];
     for(const [m] of ARB_CUR){
       const x = X[m];
-      const tk = k => base + k, fxN = (a, b) => { const d = a === '' ? b : a; return d === 'D' ? 'MEP' : 'CCL'; };
+      const tk = k => monTk(base, k), fxN = (a, b) => { const d = a === '' ? b : a; return d === 'D' ? 'MEP' : 'CCL'; };
       if(m === c){ routes.push({m, direct:true, bid:x.bid, ask:x.ask, nb:x.qb, na:x.qa,
         legA: 'compro '+tk(c)+' al offer '+fmtP(x.ask), legB: 'vendo '+tk(c)+' al bid '+fmtP(x.bid)}); continue; }
       const fc = F[c], fm = F[m];
@@ -3255,7 +3256,7 @@ function addArbTab(){
 function arbVol(x){
   // monto operado hoy en cada moneda (data912: nominales × último / 100): pesos en $, MEP y CCL en USD
   const pm = state.rawPM || {};
-  const one = (c, lab) => { const o = pm[x.base + c], v = o && o.volumen || 0;
+  const one = (c, lab) => { const o = pm[monTk(x.base, c)], v = o && o.volumen || 0;
     return '<span'+(c === x.pago ? ' class="arbvp"' : '')+'>'+lab+' <b>'+(v > 0 ? (c === '' ? '$ '+fmtVolumen(v) : 'USD '+fmtUsdK(v)) : '—')+'</b>'+(o && o.ops ? ' <em>'+o.ops+' op.</em>' : '')+'</span>'; };
   return '<div class="arbvol">Operado hoy: '+one('', 'Pesos')+one('D', 'MEP (D)')+one('C', 'CCL (C)')+'</div>';
 }
