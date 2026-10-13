@@ -226,6 +226,7 @@ tr.detrow td{background:var(--bg3);padding:10px 14px;text-align:left;}
 .leg a,[data-zreset]{color:var(--accent);}
 table.impl td{text-align:right;} table.impl td:first-child,table.impl td:nth-child(2){text-align:left;}
 td.mainrate{font-size:15px;font-weight:700;color:var(--text) !important;white-space:nowrap;}
+.arbvol{margin-top:8px;padding-top:6px;border-top:1px solid var(--line);font-size:11px;color:var(--text-dim);display:flex;gap:14px;flex-wrap:wrap}.arbvol em{font-style:normal;color:var(--text-faint)}.arbvol .arbvp b{color:var(--text)}
 td.mainrate .boRate{font-size:10.5px;font-weight:400;color:var(--text-dim);margin-left:3px;}
 .rp{font-family:var(--mono);font-size:12px;color:var(--text-dim);}
 .rp b{color:var(--text);font-size:13px;}
@@ -292,8 +293,8 @@ const CER = [{"t": "TZXO6", "emis": "2024-10-31", "cerFix": null, "vto": "2026-1
 // que se convierte a pesos multiplicando por CER_actual/cerEmis (cociente de CER), y el
 // conjunto se resuelve por XIRR igual que Soberanos. Cronograma pasado a mano por Pablo.
 const CER_MULTICUPON = [
-  { t:'TX26', vto:'2026-11-09', cerEmis:22.544, coupons:[
-    {d:'2026-11-09', rate:20.2},
+  { t:'TX26', vto:'2026-11-11', cerEmis:22.544, coupons:[
+    {d:'2026-11-11', rate:20.2},
   ]},
   { t:'TX28', vto:'2028-11-09', cerEmis:22.544, coupons:[
     {d:'2026-11-09', rate:10.5625}, {d:'2027-05-09', rate:10.45}, {d:'2027-11-09', rate:10.3375},
@@ -508,6 +509,12 @@ function loadRostersFromWorkbook(wb){
     r => ({t:tk(r[0]), pago:r[1], vto:iso(r[2])})), 'TF');
 
   const multi = new Set(CER_MULTICUPON.map(b => b.t));
+  // TX26 (un solo cupón al vencimiento): si el Sheet (CER!D) trae otra fecha de vencimiento, la toma de ahí.
+  for(const b of CER_MULTICUPON){
+    if(b.coupons.length !== 1) continue;
+    const row = (rowsOf('CER') || []).find(r => r && tk(r[0]) === b.t && isD(r[3]));
+    if(row){ const d = iso(row[3]); b.vto = d; b.coupons[0].d = d; }
+  }
   swap(CER, scan(rowsOf('CER'), r => typeof r[2]==='number' && isD(r[3]) && !multi.has(tk(r[0])),
     r => ({t:tk(r[0]), emis: isD(r[1]) ? iso(r[1]) : null, cerFix:r[2], vto:iso(r[3])})), 'CER');
 
@@ -1883,7 +1890,16 @@ function hoyVolSvg(pts, bars, col){
   let lo = Math.min(...P.map(a => a[1])), hi = Math.max(...P.map(a => a[1])); if(hi === lo){ hi += 1e-9; lo -= 1e-9; }
   const Y = v => HP-2 - (v-lo)/(hi-lo)*(HP-4);
   let s = '<svg class="spk" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">';
-  s += '<path d="'+P.map((a,i)=>(i?'L':'M')+X(a[0]).toFixed(1)+','+Y(a[1]).toFixed(1)).join(' ')+'" fill="none" stroke="'+col+'" stroke-width="1.3"/>';
+  // tramo con operaciones = línea llena; tramo sin operaciones (precio arrastrado) = punteado y clarito
+  const bt = bars.map(b => b[0]).sort((a,b) => a-b);
+  const traded = (ta, tb) => bt.some(t => t > ta && t <= tb + 1000);
+  let full = '', dash = '';
+  for(let i=1;i<P.length;i++){
+    const seg = 'M'+X(P[i-1][0]).toFixed(1)+','+Y(P[i-1][1]).toFixed(1)+' L'+X(P[i][0]).toFixed(1)+','+Y(P[i][1]).toFixed(1)+' ';
+    if(traded(P[i-1][0], P[i][0])) full += seg; else dash += seg;
+  }
+  if(dash) s += '<path d="'+dash+'" fill="none" stroke="'+col+'" stroke-width="1" stroke-dasharray="2 2" opacity=".4"/>';
+  if(full) s += '<path d="'+full+'" fill="none" stroke="'+col+'" stroke-width="1.4"/>';
   const yb = H - 0.5, mx = Math.max(0, ...bars.map(b => b[1]));
   s += '<line x1="0" x2="'+W+'" y1="'+yb+'" y2="'+yb+'" stroke="var(--line)"/>';
   const bw = Math.max(1, Math.min(3, (W-2)/Math.max(1, (tN - t0)/60000) - 0.3));
@@ -2647,7 +2663,7 @@ function barsSvg(host, items, o){
     const top = Math.min(y1, ok(x.hi) ? Y(x.hi) : y1, ok(x.lo) ? Y(x.lo) : y1), bot = Math.max(y1, ok(x.hi) ? Y(x.hi) : y1, ok(x.lo) ? Y(x.lo) : y1);
     // valor + bid / offer (cuando los hay), apilados arriba de la barra (o abajo si es negativa)
     const lines = [o.fv(x.v)];
-    if(ok(x.bid) || ok(x.off)) lines.push('b '+(ok(x.bid)?o.fv(x.bid):'—'), 'o '+(ok(x.off)?o.fv(x.off):'—'));
+    if(ok(x.bid) || ok(x.off)) lines.push('('+(ok(x.bid)?o.fv(x.bid):'—')+' / '+(ok(x.off)?o.fv(x.off):'—')+')');
     lines.forEach((t, j) => {
       const y = Math.min(top, y0) - 5 - j*11;   // siempre arriba (en negativos, arriba de la línea de cero) para no pisar las etiquetas de abajo
       s += '<text x="'+cx+'" y="'+y+'" text-anchor="middle" font-size="'+(j?9:10.5)+'" fill="'+(j?'var(--text-dim)':'var(--text)')+'" font-family="var(--mono)">'+t+'</text>';
@@ -3227,22 +3243,33 @@ function addArbTab(){
     '<b>MEP aj. / CCL aj.</b> = la punta en la otra moneda dólar pasada con el canje del AL30. Lo lógico es que la original sea la mejor: <span class="arbhi">resaltado</span> = una ajustada le gana (y por cuánto). '+
     '<b>Cruzado</b> = el mejor bid supera al mejor offer: compro por una y vendo por la otra. Debajo de cada precio, los nominales en la punta (en las ajustadas, el mínimo entre esa punta y lo que alcanza la punta del AL30 para convertir). Puntas a más de 10% del último se descartan.</p>'+
     '<div class="pxbar">Mostrar: '+segBtns('arbfilt', state.arbFilt, [['des','Solo desarbitrados'],['all','Todos']])+
-    ' &nbsp;Mejora mínima: <select id="arbMin"><option value="0">0</option><option value="0.0005" selected>0,05%</option><option value="0.001">0,10%</option><option value="0.0025">0,25%</option><option value="0.005">0,50%</option></select> <span class="small" id="arbInfo"></span></div>'+
+    ' &nbsp;<input id="arbQ" type="search" placeholder="Buscar especie (ej. GD30, AO27, BPA7)" autocomplete="off" style="width:230px"> &nbsp;Mejora mínima: <select id="arbMin"><option value="0">0</option><option value="0.0005" selected>0,05%</option><option value="0.001">0,10%</option><option value="0.0025">0,25%</option><option value="0.005">0,50%</option></select> <span class="small" id="arbInfo"></span></div>'+
     '<div class="arbgrid" id="arbGrid"></div>';
   document.getElementById('panels').appendChild(panel);
+  panel.querySelector('#arbQ').oninput = (e) => { state.arbQ = e.target.value; renderArb(); };
   panel.querySelector('#arbMin').onchange = (e) => { state.arbMin = +e.target.value; renderArb(); };
   panel.querySelectorAll('.arbfilt button').forEach(b => b.onclick = () => {
     state.arbFilt = b.dataset.v; panel.querySelectorAll('.arbfilt button').forEach(x => x.classList.toggle('on', x === b)); renderArb();
   });
+}
+function arbVol(x){
+  // monto operado hoy en cada moneda (data912: nominales × último / 100): pesos en $, MEP y CCL en USD
+  const pm = state.rawPM || {};
+  const one = (c, lab) => { const o = pm[x.base + c], v = o && o.volumen || 0;
+    return '<span'+(c === x.pago ? ' class="arbvp"' : '')+'>'+lab+' <b>'+(v > 0 ? (c === '' ? '$ '+fmtVolumen(v) : 'USD '+fmtUsdK(v)) : '—')+'</b>'+(o && o.ops ? ' <em>'+o.ops+' op.</em>' : '')+'</span>'; };
+  return '<div class="arbvol">Operado hoy: '+one('', 'Pesos')+one('D', 'MEP (D)')+one('C', 'CCL (C)')+'</div>';
 }
 function renderArb(){
   const grid = document.getElementById('arbGrid'); if(!grid) return;
   const fmtN = v => v == null ? '' : (v >= 1e6 ? fmt(v/1e6,1)+'M' : v >= 1e3 ? Math.round(v/1e3)+'k' : fmt(v,0));
   const all = BONDS.filter(b => b.base !== 'AL30').map(b => { const pago = ARB_PAGO[b.grupo] || 'D'; return Object.assign(arbBond(b.base, pago), {grupo:b.grupo, pago}); }).filter(x => x.ok);
   const mn = state.arbMin || 0;
-  const list = (state.arbFilt === 'all' ? all : all.filter(x => x.maxEdge > mn)).sort((a,b) => (b.cross - a.cross) || (b.maxEdge - a.maxEdge) || a.base.localeCompare(b.base));
+  const q = (state.arbQ || '').trim().toUpperCase().replace(/\s+/g, ' ').split(/[ ,;]+/).filter(Boolean);
+  const hit = x => q.some(w => x.base.indexOf(w) >= 0);
+  // con texto en el buscador se muestran todas las que coinciden (aunque no estén desarbitradas); sin texto, vale el filtro de siempre
+  const list = (q.length ? all.filter(hit) : (state.arbFilt === 'all' ? all : all.filter(x => x.maxEdge > mn))).sort((a,b) => (b.cross - a.cross) || (b.maxEdge - a.maxEdge) || a.base.localeCompare(b.base));
   const f30 = ARB_CUR.map(([k, lab]) => { const q = arbQuote('AL30'+k); return lab+' '+fmtP(q.bid)+' / '+fmtP(q.ask); }).join(' · ');
-  document.getElementById('arbInfo').textContent = list.length+' de '+all.length+' especies · AL30: '+f30;
+  document.getElementById('arbInfo').textContent = list.length+' de '+all.length+' especies'+(q.length ? ' (búsqueda: '+q.join(', ')+')' : '')+' · AL30: '+f30;
   const via = r => r.direct ? 'original' : (r.m === '' ? 'pesos aj.' : r.m === 'D' ? 'MEP aj.' : 'CCL aj.');
   grid.innerHTML = list.map(x => {
     const blocks = ARB_CUR.filter(([c]) => c === x.pago).map(([c, lab]) => {
@@ -3260,8 +3287,8 @@ function renderArb(){
     }).join('');
     const xc = Object.values(x.cur).some(C => C.cross > mn);
     return '<div class="card arbcard'+(xc ? ' arbcross' : '')+'"><h3>'+x.base+' <span class="small" style="text-transform:none">'+x.grupo+'</span>'+
-      (x.maxEdge > mn ? '<span class="arbtag">'+(xc ? 'arbitraje +'+fmt(Math.max(...Object.values(x.cur).map(C => C.cross || 0))*100,2)+'%' : 'mejora +'+fmt(x.maxEdge*100,2)+'%')+'</span>' : '')+'</h3><div class="arbcurs">'+blocks+'</div></div>';
-  }).join('') || '<div class="note">Ninguna especie con una mejora mayor a '+fmt(mn*100,2)+'%: el mejor bid y el mejor offer de cada moneda son los directos (o casi).</div>';
+      (x.maxEdge > mn ? '<span class="arbtag">'+(xc ? 'arbitraje +'+fmt(Math.max(...Object.values(x.cur).map(C => C.cross || 0))*100,2)+'%' : 'mejora +'+fmt(x.maxEdge*100,2)+'%')+'</span>' : '')+'</h3><div class="arbcurs">'+blocks+'</div>'+arbVol(x)+'</div>';
+  }).join('') || (q.length ? '<div class="note">Ninguna especie coincide con «'+q.join(', ')+'»'+(q.some(w => 'AL30'.indexOf(w) >= 0) ? ' (el AL30 no está: es el que arma el FX)' : ' o no tiene puntas ahora')+'.</div>' : '<div class="note">Ninguna especie con una mejora mayor a '+fmt(mn*100,2)+'%: el mejor bid y el mejor offer de cada moneda son los directos (o casi).</div>');
 }
 
 /* ============================== HISTÓRICO SOBERANOS (CSV BOLSAR) ============================== */
