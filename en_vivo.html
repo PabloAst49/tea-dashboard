@@ -328,6 +328,8 @@ const CER_MULTICUPON = [
   ]},
 ];
 
+const CER_MULTICUPON_ALL = CER_MULTICUPON.slice();   // copia completa: los que pasan a la hoja TF salen de CER y vuelven si se los saca de TF
+
 function tirDurationXIRR(cfs, precio, liq){
   // cfs: [{date, flujo}] futuros. Misma mecánica que calcSoberanos (Newton-Raphson + Macaulay).
   if(!cfs.length || !precio) return {tir:null, duration:null};
@@ -527,6 +529,9 @@ function loadRostersFromWorkbook(wb){
   swap(TF, scan(rowsOf('TF'), r => typeof r[1]==='number' && isD(r[2]),
     r => ({t:tk(r[0]), pago:r[1], vto:iso(r[2])})), 'TF');
 
+  // una especie que está en la hoja TF (ej. TX26, TZXO6 cuando su CER ya quedó fijo) es Tasa Fija: sale de CER y de los multicupón
+  const tfSet = new Set(TF.map(b => b.t));
+  CER_MULTICUPON.length = 0; CER_MULTICUPON_ALL.forEach(b => { if(!tfSet.has(b.t)) CER_MULTICUPON.push(b); });
   const multi = new Set(CER_MULTICUPON.map(b => b.t));
   // TX26 (un solo cupón al vencimiento): si el Sheet (CER!D) trae otra fecha de vencimiento, la toma de ahí.
   for(const b of CER_MULTICUPON){
@@ -534,7 +539,7 @@ function loadRostersFromWorkbook(wb){
     const row = (rowsOf('CER') || []).find(r => r && tk(r[0]) === b.t && isD(r[3]));
     if(row){ const d = iso(row[3]); b.vto = d; b.coupons[0].d = d; }
   }
-  swap(CER, scan(rowsOf('CER'), r => typeof r[2]==='number' && isD(r[3]) && !multi.has(tk(r[0])),
+  swap(CER, scan(rowsOf('CER'), r => typeof r[2]==='number' && isD(r[3]) && !multi.has(tk(r[0])) && !tfSet.has(tk(r[0])),
     r => ({t:tk(r[0]), emis: isD(r[1]) ? iso(r[1]) : null, cerFix:r[2], vto:iso(r[3])})), 'CER');
 
   swap(TAMAR, scan(rowsOf('TAMAR'), r => isD(r[1]) && typeof r[2]==='number' && isD(r[3]),
