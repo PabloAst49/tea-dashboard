@@ -2040,7 +2040,7 @@ function drawDetail(tab, row){
   const pv = state.prev && state.prev.px[key] ? state.prev.px[key].p : null;
   const dd = state.prev ? state.prev.date.split('-').reverse().slice(0,2).join('/') : '';
   const sp = (q.bid && q.ask) ? (q.ask/q.bid - 1)*100 : null;
-  const lastsD = ilogPx(key).map(a => a[1]).filter(v => v); if(q.precio) lastsD.push(q.precio);
+  const lastsD = tradedPts(key).map(a => a[1]);
   const pMin = lastsD.length ? Math.min(...lastsD) : null, pMax = lastsD.length ? Math.max(...lastsD) : null;
   const rMM = v => { const r = v ? rateAt(tab, row.t, key, v) : null; return r == null ? '' : ' <span class="small">('+fmtPct(r,2)+')</span>'; };
   host.innerHTML = '<div class="dstats"><span>'+key+'</span>'+
@@ -3187,17 +3187,22 @@ function checkFavs(initOnly){
 }
 
 /* ---- dispersión del día: cuánto se movió lo operado (rango y desvío), en centavos ---- */
+function tradedPts(key){
+  // solo los minutos con operaciones reales (subieron los nominales): ahí el "último" es un precio operado; el resto es el último arrastrado
+  const arr = ilogPx(key).filter(a => a[1]), out = [];
+  for(let i = 1; i < arr.length; i++){ const dn = (arr[i][4] != null && arr[i-1][4] != null) ? arr[i][4] - arr[i-1][4] : 0; if(dn > 0) out.push([arr[i][0], arr[i][1]]); }
+  return out;
+}
 function dispInfo(key){
-  const arr = ilogPx(key).map(a => a[1]).filter(v => v), cur = (state.rawPM || {})[key];
-  if(cur && cur.precio) arr.push(cur.precio);
-  if(arr.length < 3) return null;
+  const arr = tradedPts(key).map(a => a[1]);
+  if(arr.length < 2) return null;
   const mn = Math.min(...arr), mx = Math.max(...arr), m = arr.reduce((a,b) => a+b, 0)/arr.length;
   return {mn, mx, rg: mx - mn, sd: Math.sqrt(arr.reduce((a,b) => a + (b-m)*(b-m), 0)/arr.length), n: arr.length, ref: m};
 }
 function fmtC(v, ref){ if(v == null || !isFinite(v)) return '—'; return ref < 1000 ? fmt(v*100, v*100 < 10 ? 1 : 0)+'c' : '$ '+fmt(v, 0); }
 function dispHtml(key){
   const d = dispInfo(key); if(!d) return '';
-  return '<div class="disp" title="Dispersión de lo operado hoy: rango (máx − mín) y desvío estándar de los precios por minuto. Mín '+fmtP(d.mn)+' · máx '+fmtP(d.mx)+'">rg '+fmtC(d.rg, d.ref)+' · σ '+fmtC(d.sd, d.ref)+'</div>';
+  return '<div class="disp" title="Dispersión de lo operado hoy (solo minutos con operaciones): rango (máx − mín) y desvío estándar de los precios. Mín '+fmtP(d.mn)+' · máx '+fmtP(d.mx)+'">rg '+fmtC(d.rg, d.ref)+' · σ '+fmtC(d.sd, d.ref)+'</div>';
 }
 
 /* ---- gráfico intradiario grande (precio o tasa) con eje de horas, banda bid–offer, referencia y volumen por minuto ---- */
@@ -3220,7 +3225,10 @@ function intradaySvg(host, S){
   const B = P.filter(a => ok(a[2]) && ok(a[3]));
   if(B.length > 1) s += '<path d="'+B.map((a,i) => (i?'L':'M')+X(a[0]).toFixed(1)+','+Y(Math.max(a[2],a[3])).toFixed(1)).join(' ')+' '+B.slice().reverse().map(a => 'L'+X(a[0]).toFixed(1)+','+Y(Math.min(a[2],a[3])).toFixed(1)).join(' ')+' Z" fill="'+S.col+'" opacity=".16"/>';
   if(ok(S.ref)) s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+Y(S.ref).toFixed(1)+'" y2="'+Y(S.ref).toFixed(1)+'" stroke="var(--warn)" stroke-width="1.4" stroke-dasharray="7 5"/><text x="'+(W-m.r)+'" y="'+(Y(S.ref)-5).toFixed(1)+'" text-anchor="end" font-size="10.5" fill="var(--warn)" font-family="var(--mono)">rueda anterior '+S.fy(S.ref)+'</text>';
-  s += '<path d="'+P.map((a,i) => (i?'L':'M')+X(a[0]).toFixed(1)+','+Y(a[1]).toFixed(1)).join(' ')+'" fill="none" stroke="'+S.col+'" stroke-width="1.8" stroke-linejoin="round"/>';
+  const TT = new Set(S.bars.map(b => b[0])); let full = '', dash = '';
+  for(let i = 1; i < P.length; i++){ const seg = 'M'+X(P[i-1][0]).toFixed(1)+','+Y(P[i-1][1]).toFixed(1)+' L'+X(P[i][0]).toFixed(1)+','+Y(P[i][1]).toFixed(1)+' '; if(TT.has(P[i][0])) full += seg; else dash += seg; }
+  if(dash) s += '<path d="'+dash+'" fill="none" stroke="'+S.col+'" stroke-width="1.2" stroke-dasharray="3 3" opacity=".45"/>';
+  s += '<path d="'+full+'" fill="none" stroke="'+S.col+'" stroke-width="1.8" stroke-linejoin="round"/>';
   const lp = P[P.length-1]; s += '<circle cx="'+X(lp[0]).toFixed(1)+'" cy="'+Y(lp[1]).toFixed(1)+'" r="3.2" fill="'+S.col+'"/>';
   // volumen por minuto
   const yb = H - 22, mx = Math.max(0, ...S.bars.map(b => b[1])), bw = Math.max(1.5, Math.min(5, (W - m.l - m.r)/Math.max(1, (tN - t0)/60000)*0.8));
@@ -3267,7 +3275,8 @@ function renderHoy(){
   const pv = state.prev && state.prev.px[key] ? state.prev.px[key].p : null;
   let ref = pv; if(mode === 'tasa' && pv){ try{ const r = rateAt(tab, row.t, key, pv); ref = r == null ? null : r*100; }catch(e){ ref = null; } }
   const fy = mode === 'tasa' ? (v => fmt(v, 2)+'%') : (v => fmtP(v)), money = v => usd ? 'USD '+fmtUsdK(v) : '$ '+fmtVolumen(v);
-  const last = pts && pts.length ? pts[pts.length-1][1] : null, first = pts && pts.length ? pts[0][1] : null;
+  const TTs = new Set(bars.map(b => b[0])), fp = pts && pts.find(a => TTs.has(a[0]));
+  const last = pts && pts.length ? pts[pts.length-1][1] : null, first = fp ? fp[1] : null;
   const d = dispInfo(key), flow = favFlow(key, o.precio);
   const dd = (a, b) => (a != null && b != null) ? (mode === 'tasa' ? ((b - a) >= 0 ? '+' : '')+fmt((b - a)*100, 0)+' pb' : ((b/a - 1) >= 0 ? '+' : '')+fmt((b/a - 1)*100, 2)+'%') : '—';
   const col = (mode === 'tasa' && last != null && ref != null) ? (last <= ref ? 'var(--accent)' : 'var(--bad)') : 'var(--accent)';
@@ -3276,11 +3285,11 @@ function renderHoy(){
     '<span class="star hoystar" data-fav="'+tab.id+'|'+row.t+'" title="Favorito">'+(isFav(tab.id, row.t) ? '★' : '☆')+'</span>'+
     '<span class="seg hoyseg"><button data-hm="tasa"'+(mode === 'tasa' ? ' class="on"' : '')+'>Tasa</button><button data-hm="px"'+(mode === 'px' ? ' class="on"' : '')+'>Precio</button></span>'+
     '<button class="hoyx" data-hm="x" title="Cerrar (Esc)">✕</button></div>'+
-    '<div class="hoykpi">'+kp('Último', last != null ? fy(last) : '—')+kp('Desde 10:40', dd(first, last))+(ref != null ? kp('vs rueda anterior', dd(ref, last)) : '')+
-      kp('Mín / máx (precio)', d ? fmtP(d.mn)+' / '+fmtP(d.mx) : '—')+kp('Rango del día', d ? fmtC(d.rg, d.ref) : '—', 'Máximo − mínimo de lo operado, en centavos')+kp('Desvío σ', d ? fmtC(d.sd, d.ref) : '—', 'Desvío estándar de los precios por minuto')+
+    '<div class="hoykpi">'+kp('Último', last != null ? fy(last) : '—')+kp('Desde 1ª operación', dd(first, last), 'Variación desde el primer precio realmente operado del día')+(ref != null ? kp('vs rueda anterior', dd(ref, last)) : '')+
+      kp('Mín / máx operado', d ? fmtP(d.mn)+' / '+fmtP(d.mx) : '—')+kp('Rango del día', d ? fmtC(d.rg, d.ref) : '—', 'Máximo − mínimo de lo operado, en centavos')+kp('Desvío σ', d ? fmtC(d.sd, d.ref) : '—', 'Desvío estándar de los precios por minuto')+
       kp('Operado hoy', money(o.volumen || 0)+(o.ops ? ' · '+o.ops+' op.' : ''))+kp('Últimos 15 min', flow > 0 ? money(flow) : '—')+'</div>'+
     '<div id="hoyChart"></div><div class="note" style="margin-top:6px">'+(mode === 'tasa' ? 'Tasa de la pestaña ('+(tab.curveLabel || 'tasa')+') al último operado; banda = tasa al bid / al offer. ' : 'Precio último operado; banda = bid / offer. ')+
-      'Barras abajo = monto operado por minuto (amarillo = últimos 15 min). Línea punteada = '+(mode === 'tasa' ? 'la tasa' : 'el precio')+' de la rueda anterior. Pasá el mouse para ver cada minuto.</div></div>';
+      'Mín, máx, rango y σ cuentan solo precios realmente operados (minutos con volumen). Barras abajo = monto operado por minuto (amarillo = últimos 15 min); tramo punteado claro = sin operaciones (precio arrastrado). Línea de guiones = '+(mode === 'tasa' ? 'la tasa' : 'el precio')+' de la rueda anterior. Pasá el mouse para ver cada minuto.</div></div>';
   intradaySvg(document.getElementById('hoyChart'), {pts, bars, ref, fy, fvol: v => usd ? fmtUsdK(v) : fmtVolumen(v), col});
 }
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && state.hoyModal) closeHoy(); });
