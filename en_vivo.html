@@ -242,6 +242,10 @@ td.mainrate{font-size:15px;font-weight:700;color:var(--text) !important;white-sp
 .hoyh{display:flex;align-items:center;gap:12px;margin-bottom:10px;} .hoyt{font-family:var(--mono);font-size:18px;} .hoystar{font-size:17px;margin:0;} .hoyseg{margin-left:auto;} .hoyx{background:none;border:1px solid var(--line);color:var(--text-dim);border-radius:6px;cursor:pointer;padding:3px 9px;}
 .hoykpi{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:10px;} .hoykpi span{display:block;font-family:var(--mono);font-size:10.5px;color:var(--text-dim);} .hoykpi b{font-family:var(--mono);font-size:13.5px;font-weight:600;}
 .hoytip{position:absolute;display:none;background:var(--bg3);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-family:var(--mono);font-size:11px;pointer-events:none;white-space:nowrap;} .hoytip span{color:var(--text-dim);}
+details.pan{margin:0 0 14px;} details.pan>summary{cursor:pointer;list-style:none;font-size:14.5px;font-weight:600;padding:8px 2px;border-bottom:1px solid var(--line);margin-bottom:10px;user-select:none;} details.pan>summary::-webkit-details-marker,details.vsec>summary::-webkit-details-marker{display:none;}
+details.pan>summary::before{content:'▾';display:inline-block;width:16px;color:var(--text-dim);} details.pan:not([open])>summary::before{content:'▸';}
+details.vsec>summary{cursor:pointer;list-style:none;} details.vsec>summary::before{content:'▾ ';color:var(--text-dim);} details.vsec:not([open])>summary::before{content:'▸ ';}
+.vdl em{font-style:normal;font-weight:400;color:var(--text-dim);font-size:10.5px;}
 td.mainrate .boRate{font-size:10.5px;font-weight:400;color:var(--text-dim);margin-left:3px;}
 .rp{font-family:var(--mono);font-size:12px;color:var(--text-dim);}
 .rp b{color:var(--text);font-size:13px;}
@@ -1178,6 +1182,7 @@ function renderTabs(){
   addResumenTab();
   addVolTab();
   addFavTab();
+  unifyPanorama();
 }
 
 function switchTab(id){
@@ -1185,9 +1190,8 @@ function switchTab(id){
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id==='panel-'+id));
   const tab = TABS.find(t => t.id===id);
   if(tab) renderTable(tab); // recalcula el gráfico con el ancho real ya visible
-  if(id === 'fx') renderFx();
+  if(id === 'res'){ renderResumen(); renderVol(); renderFx(); }
   if(id === 'arb') renderArb();
-  if(id === 'vol') renderVol();
 }
 let _rsz = null;
 window.addEventListener('resize', () => { clearTimeout(_rsz); _rsz = setTimeout(() => { const a = document.querySelector('.panel.active'); const tab = a && TABS.find(t => 'panel-'+t.id === a.id); if(tab) renderTable(tab); }, 200); });
@@ -3072,6 +3076,35 @@ function renderRel(S, Lg, id){
 function renderFwd(){ TABS.forEach(t => { const p = document.getElementById('panel-'+t.id); if(p && p.classList.contains('active')) renderFwdTab(t.id); }); }
 
 
+
+/* ============================== PANORAMA: Resumen + Volumen + FX en una sola pantalla, con secciones desplegables ============================== */
+const PAN_KEY = 'envivo_pan_v1';
+function unifyPanorama(){
+  const res = document.getElementById('panel-res'), pv = document.getElementById('panel-vol'), pf = document.getElementById('panel-fx');
+  if(!res || res.dataset.pan) return;
+  res.dataset.pan = '1';
+  let st = {}; try{ st = JSON.parse(localStorage.getItem(PAN_KEY)) || {}; }catch(e){}
+  const mk = (id, title, nodes, def, fn) => {
+    const d = document.createElement('details'); d.className = 'pan'; d.dataset.sec = id; d.open = st[id] != null ? !!st[id] : def;
+    const sm = document.createElement('summary'); sm.textContent = title; d.appendChild(sm);
+    const b = document.createElement('div'); b.className = 'pan-body'; nodes.forEach(n => b.appendChild(n)); d.appendChild(b);
+    d.addEventListener('toggle', () => { st[id] = d.open; try{ localStorage.setItem(PAN_KEY, JSON.stringify(st)); }catch(e){} if(d.open){ try{ fn(); }catch(e){} } });
+    return d;
+  };
+  const kids = el => el ? Array.from(el.childNodes) : [];
+  const secRes = mk('res', 'Resumen del mercado', kids(res), true, () => renderResumen());
+  res.innerHTML = '';
+  res.appendChild(secRes);
+  if(pv){ res.appendChild(mk('vol', 'Volumen de la rueda', kids(pv), true, () => renderVol())); pv.remove(); }
+  if(pf){ res.appendChild(mk('fx', 'FX · MEP / CCL / Canje', kids(pf), true, () => renderFx())); pf.remove(); }
+  ['vol', 'fx'].forEach(id => { const t = document.querySelector('#tabsRow .tab[data-tab='+id+']'); if(t) t.remove(); });
+  res.querySelector('details[data-sec=vol] .pan-body').addEventListener('toggle', (e) => {
+    const d = e.target; if(d && d.dataset && d.dataset.vk){ (state.volOpen || (state.volOpen = {}))[d.dataset.vk] = d.open; }
+  }, true);
+  const tr = document.querySelector('#tabsRow .tab[data-tab=res]'); if(tr) tr.innerHTML = 'Resumen · Volumen · FX';
+  renderResumen(); renderVol(); renderFx();
+}
+
 /* ============================== FAVORITOS · ALERTAS · INTRADIARIO AMPLIADO · DISPERSIÓN ============================== */
 const FAV_KEY = 'envivo_favs_v1';
 const FAV_VOL = {ARS:[50e6, 100e6, 300e6, 1e9], USD:[20e3, 50e3, 150e3, 500e3]};   // volumen que tiene que entrar para avisar
@@ -3260,7 +3293,7 @@ function addFavTab(){
   const el = document.createElement('div');
   el.className = 'tab'; el.dataset.tab = 'fav'; el.innerHTML = 'Favoritos';
   el.onclick = () => { switchTab('fav'); state.fav.unseen = 0; document.title = _title0; renderFavs(); };
-  const tabsRow = document.getElementById('tabsRow'), v = tabsRow.querySelector('.tab[data-tab=vol]');
+  const tabsRow = document.getElementById('tabsRow'), v = tabsRow.querySelector('.tab[data-tab=res]');
   tabsRow.insertBefore(el, v ? v.nextSibling : null);
   const panel = document.createElement('div'); panel.className = 'panel'; panel.id = 'panel-fav';
   panel.innerHTML = '<div id="favBody"></div>';
@@ -3310,7 +3343,7 @@ function renderFavs(){
 state.volView = 'ars';
 const VOL_FAM_ARS = [
   {id:'tf', lab:'Tasa Fija', col:'#2f9e7a'}, {id:'cer', lab:'CER', col:'#d06a32'}, {id:'tamar', lab:'TAMAR', col:'#4a7fd4'},
-  {id:'dl', lab:'Dollar-Linked', col:'#9a5cc6'}, {id:'dual', lab:'Duales', col:'#c9a227'}, {id:'sobars', lab:'Soberanos (pesos)', col:'#2aa3ad'},
+  {id:'dl', lab:'Dollar-Linked', col:'#9a5cc6'}, {id:'dual', lab:'Duales', col:'#c9a227'}
 ];
 const VOL_FAM_USD = [
   {id:'GLOBALES', lab:'Globales', col:'#4a7fd4'}, {id:'BONARES', lab:'Bonares', col:'#2f9e7a'}, {id:'BOPREAL', lab:'BOPREAL', col:'#d06a32'},
@@ -3338,7 +3371,6 @@ function volData(view){
         seen.add(r.t); add(fid, r.t, [r.t]);
       }
     }
-    BONDS.forEach(b => add('sobars', b.base, [monTk(b.base, '')]));
   }
   out.forEach(f => f.items.sort((a,b) => b.v - a.v));
   const total = out.reduce((a,f) => a + f.total, 0), prev = out.reduce((a,f) => a + f.prev, 0);
@@ -3405,20 +3437,21 @@ function renderVol(){
   h += '<div class="vollegend">'+F.map(f => '<span><i style="background:'+f.col+'"></i>'+f.lab+' '+fv(f.total)+' ('+fmt(f.total/D.total*100,0)+'%)'+
     (f.prev > 0 ? ' <em class="'+(f.total>=f.prev?'pos':'neg')+'">'+(f.total>=f.prev?'+':'')+fmt((f.total/f.prev-1)*100,0)+'%</em>' : '')+'</span>').join('')+'</div>';
   // donas por familia
-  h += '<div class="secttl">Cómo se reparte cada familia entre sus especies</div><div class="voldonuts">';
+  const vo = state.volOpen || (state.volOpen = {don:true, rank:true});
+  h += '<details class="vsec" data-vk="don"'+(vo.don ? ' open' : '')+'><summary class="secttl">Cómo se reparte cada familia entre sus especies</summary><div class="voldonuts">';
   for(const f of F){
     const top = f.items.slice(0, 6), rest = f.items.slice(6), restV = rest.reduce((a,x) => a + x.v, 0);
     const sl = top.map((x,i) => ({lab:x.t, v:x.v, col:SLICE_COLS[i]})); if(restV > 0) sl.push({lab:'otras ('+rest.length+')', v:restV, col:SLICE_COLS[6]});
     h += '<div class="card voldonut"><div class="vdh"><b style="color:'+f.col+'">'+f.lab+'</b><span>'+fv(f.total)+'</span></div><div class="vdb">'+donutSvg(sl, 118)+
-      '<div class="vdl">'+sl.map(x => '<div><i style="background:'+x.col+'"></i><span>'+x.lab+'</span><b>'+fmt(x.v/f.total*100,0)+'%</b></div>').join('')+'</div></div></div>';
+      '<div class="vdl">'+sl.map(x => '<div><i style="background:'+x.col+'"></i><span>'+x.lab+'</span><b>'+fmt(x.v/f.total*100,0)+'% <em>('+volFmt(x.v, usd)+')</em></b></div>').join('')+'</div></div></div>';
   }
-  h += '</div>';
+  h += '</div></details>';
   // ranking
   const all = F.flatMap(f => f.items.map(x => Object.assign({}, x, {col:f.col, fam:f.lab}))).sort((a,b) => b.v - a.v).slice(0, 25);
   const mx = all.length ? all[0].v : 1;
-  h += '<div class="secttl">Ranking de la rueda · top '+all.length+' especies</div><div class="volrank">'+
-    all.map(x => '<div class="vr" title="'+x.t+' · '+x.fam+' · '+fv(x.v)+(x.ops ? ' · '+x.ops+' operaciones' : '')+'"><span class="vrt">'+x.t+'</span><div class="vrb"><div style="width:'+(x.v/mx*100)+'%;background:'+x.col+'"></div><em>'+volFmt(x.v, usd)+' · '+fmt(x.v/D.total*100,0)+'%</em></div></div>').join('')+'</div>';
-  h += '<div class="secnote" style="margin-top:10px">Monto = nominales × último / 100 (data912, se actualiza cada 15 s). '+(usd ? 'Soberanos USD suma las especies D y C de cada bono, en dólares.' : 'Duales separados de CER/TAMAR/DL; Soberanos (pesos) = AL/GD/BOPREAL operados en pesos.')+' Rueda anterior = el CSV de BOLSAR cargado arriba.</div>';
+  h += '<details class="vsec" data-vk="rank"'+(vo.rank ? ' open' : '')+'><summary class="secttl">Ranking de la rueda · top '+all.length+' especies</summary><div class="volrank">'+
+    all.map(x => '<div class="vr" title="'+x.t+' · '+x.fam+' · '+fv(x.v)+(x.ops ? ' · '+x.ops+' operaciones' : '')+'"><span class="vrt">'+x.t+'</span><div class="vrb"><div style="width:'+(x.v/mx*100)+'%;background:'+x.col+'"></div><em>'+volFmt(x.v, usd)+' · '+fmt(x.v/D.total*100,0)+'%</em></div></div>').join('')+'</div></details>';
+  h += '<div class="secnote" style="margin-top:10px">Monto = nominales × último / 100 (data912, se actualiza cada 15 s). '+(usd ? 'Soberanos USD suma las especies D y C de cada bono, en dólares.' : 'Duales separados de CER/TAMAR/DL. Los soberanos (AL/GD/BOPREAL) no se cuentan acá: están en la vista Soberanos USD.')+' Rueda anterior = el CSV de BOLSAR cargado arriba.</div>';
   body.innerHTML = h;
 }
 
